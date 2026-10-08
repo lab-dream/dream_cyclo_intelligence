@@ -57,6 +57,7 @@ class InferenceRequester:
             acceleration_engine_path=str(
                 getattr(request, "acceleration_engine_path", "") or ""
             ),
+            inference_hz=float(getattr(request, "inference_hz", 0) or 0),
         )
         return self._call(
             engine_request,

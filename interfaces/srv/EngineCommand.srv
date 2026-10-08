@@ -21,6 +21,7 @@ string robot_type
 string task_instruction
 string acceleration_mode
 string acceleration_engine_path
+float64 inference_hz
 ---
 uint64 seq_id
 bool success

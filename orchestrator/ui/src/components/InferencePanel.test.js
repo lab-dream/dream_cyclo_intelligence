@@ -30,6 +30,7 @@ const renderPanel = ({
   initialPoseSync = true,
   inferenceHz = 15,
   controlHz = 100,
+  policyType = 'act',
 } = {}) => {
   const sendRecordCommand = jest.fn().mockResolvedValue({ success: true });
   useRosServiceCaller.mockReturnValue({ sendRecordCommand });
@@ -46,6 +47,7 @@ const renderPanel = ({
           initialPoseSyncDurationS: 5.0,
           inferenceHz,
           controlHz,
+          policyType,
         },
         taskInfo: {
           ...initialTasks.taskInfo,
@@ -74,6 +76,29 @@ const renderPanel = ({
 describe('InferencePanel initial pose sync settings', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  test('applies the local diffusion checkpoint and syncs its dataset FPS', async () => {
+    jest.useFakeTimers();
+    const { store, sendRecordCommand } = renderPanel({
+      inferenceMode: 'simulation', policyType: 'diffusion',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Use Task 0 · 964000 (30 FPS)' }));
+    expect(store.getState().tasks.inferenceTaskInfo).toMatchObject({
+      policyPath: '/workspace/model/lerobot/diffusion_task0_964000/pretrained_model',
+      inferenceHz: 30, controlHz: 100, actionRequestMode: 'async',
+      inferenceMode: 'simulation',
+    });
+    await act(async () => { jest.advanceTimersByTime(700); });
+    expect(sendRecordCommand).toHaveBeenCalledWith('set_task_info', {
+      autofillEmptyTaskFields: false,
+    });
+    jest.useRealTimers();
+  });
+
+  test('locks the diffusion preset while a model is active', () => {
+    renderPanel({ policyType: 'diffusion', inferencePhase: InferencePhase.INFERENCING });
+    expect(screen.getByRole('button', { name: 'Use Task 0 · 964000 (30 FPS)' })).toBeDisabled();
   });
 
   test('preserves but disables initial pose sync in simulation mode', () => {

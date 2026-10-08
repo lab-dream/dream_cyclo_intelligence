@@ -11,7 +11,10 @@ RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 if str(RUNTIME_ROOT) not in sys.path:
     sys.path.insert(0, str(RUNTIME_ROOT))
 
-from engine_process.protocol import EngineCommandResponse  # noqa: E402
+from engine_process.protocol import (  # noqa: E402
+    EngineCommandResponse, request_from_message, request_to_message_kwargs,
+    ENGINE_COMMAND_REQUEST_DEF, ENGINE_COMMAND_RESPONSE_DEF,
+)
 from main_runtime.inference_requester import InferenceRequester  # noqa: E402
 
 
@@ -29,6 +32,17 @@ class FakeEngineClient:
 
 
 class InferenceRequesterTests(unittest.TestCase):
+    def test_internal_wire_fields_match_ros_service_schema(self) -> None:
+        schema = (RUNTIME_ROOT.parents[3] / "interfaces/srv/EngineCommand.srv").read_text()
+        request, response = schema.split("---")
+
+        def fields(definition):
+            return [line.strip() for line in definition.splitlines()
+                    if line.strip() and not line.lstrip().startswith("#") and "=" not in line]
+
+        self.assertEqual(fields(request), fields(ENGINE_COMMAND_REQUEST_DEF))
+        self.assertEqual(fields(response), fields(ENGINE_COMMAND_RESPONSE_DEF))
+
     def test_get_action_default_timeout_is_five_seconds(self) -> None:
         client = FakeEngineClient(
             [EngineCommandResponse(success=True, seq_id=1)]
@@ -47,11 +61,16 @@ class InferenceRequesterTests(unittest.TestCase):
 
         requester.load_policy(type("Req", (), {
             "model_path": "/models/policy",
+            "inference_hz": 30,
             "acceleration_mode": "tensorrt_dit",
             "acceleration_engine_path": "/models/policy/dit_model_bf16.trt",
         })())
 
         self.assertEqual(client.calls[0][1], 7200.0)
+        request = client.calls[0][0]
+        self.assertEqual(request.inference_hz, 30)
+        wire_request = type("Message", (), request_to_message_kwargs(request))()
+        self.assertEqual(request_from_message(wire_request).inference_hz, 30)
         self.assertEqual(client.calls[0][0].acceleration_mode, "tensorrt_dit")
         self.assertEqual(
             client.calls[0][0].acceleration_engine_path,

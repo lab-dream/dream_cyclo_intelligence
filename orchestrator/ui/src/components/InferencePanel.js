@@ -537,6 +537,32 @@ const InferencePanel = () => {
         </div>
       </div>
 
+      {info.serviceType === 'lerobot' && info.policyType === 'diffusion' && (
+        <div className="flex items-center mb-2.5">
+          <span className={classLabel} />
+          <button
+            type="button"
+            disabled={!isEditable}
+            className="px-3 py-1.5 text-sm rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => {
+              dispatch(setInferenceTaskInfo({
+                policyPath: `${DEFAULT_PATHS.LEROBOT_CHECKPOINTS_PATH}/diffusion_task0_964000/pretrained_model`,
+                inferenceHz: 30,
+                controlHz: 100,
+                chunkAlignWindowS: 0.3,
+                actionRequestMode: 'async',
+                accelerationMode: 'pytorch',
+                accelerationEnginePath: '',
+              }));
+              dispatch(markLocalTaskInfoEdited({ source: 'inference' }));
+            }}
+            title="Use the manually copied Task 0 checkpoint and its 30 FPS settings"
+          >
+            Use Task 0 · 964000 (30 FPS)
+          </button>
+        </div>
+      )}
+
       {isGrootModel && (
         <>
           <div className={clsx('flex', 'items-center', 'mb-2.5')}>

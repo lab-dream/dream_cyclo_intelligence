@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -75,6 +76,55 @@ class Preprocessor(PreprocessingMixin):
 
 
 class PreprocessingTest(unittest.TestCase):
+    def test_diffusion_captures_time_axis_at_dataset_fps(self):
+        preprocessor = Preprocessor([1.0, 2.0], expected=2)
+        preprocessor._policy.config.type = "diffusion"
+        preprocessor._policy.config.n_obs_steps = 2
+        preprocessor._observation_interval_s = 1.0 / 30.0
+        original_build = preprocessor._build_observation
+        frames = []
+
+        def capture(task):
+            frame = original_build(task)
+            frames.append(frame)
+            preprocessor._robot._positions = [3.0, 4.0]
+            return frame
+
+        preprocessor._build_observation = capture
+        with patch.object(preprocessing.time, "monotonic", side_effect=[0.0, 0.01, 1.0]), \
+                patch.object(preprocessing.time, "sleep") as sleep:
+            batch = preprocessor._build_policy_observation("task")
+
+        sleep.assert_called_once()
+        self.assertAlmostEqual(sleep.call_args.args[0], 1.0 / 30.0 - 0.01)
+        np.testing.assert_allclose(batch[STATE_KEY], [[[1., 2.], [3., 4.]]])
+        self.assertEqual(batch["task"], ["task"])
+        self.assertEqual(len(frames), 2)
+
+    def test_single_step_diffusion_keeps_time_axis(self):
+        preprocessor = Preprocessor([1.0, 2.0], expected=2)
+        preprocessor._policy.config.type = "diffusion"
+        preprocessor._policy.config.n_obs_steps = 1
+        preprocessor._observation_interval_s = 1.0 / 30.0
+        self.assertEqual(
+            tuple(preprocessor._build_policy_observation("")[STATE_KEY].shape),
+            (1, 1, 2),
+        )
+
+    def test_other_policies_keep_single_observation(self):
+        preprocessor = Preprocessor([1.0, 2.0], expected=2)
+        self.assertEqual(
+            tuple(preprocessor._build_policy_observation("")[STATE_KEY].shape),
+            (1, 2),
+        )
+
+    def test_diffusion_propagates_sensor_failure(self):
+        preprocessor = Preprocessor([1.0, 2.0], expected=2)
+        preprocessor._policy.config.type = "diffusion"
+        preprocessor._policy.config.n_obs_steps = 2
+        preprocessor._build_observation = lambda task: {"success": False, "message": "Missing camera"}
+        self.assertFalse(preprocessor._build_policy_observation("")["success"])
+
     def test_pads_short_state_to_policy_shape(self):
         preprocessor = Preprocessor([1.0, 2.0], expected=4)
 

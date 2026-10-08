@@ -12,6 +12,7 @@ Builds a policy-ready batch from RobotClient sensor/state reads.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List
 
 import numpy as np
@@ -26,6 +27,28 @@ logger = logging.getLogger("lerobot_engine")
 
 class PreprocessingMixin:
     """RobotClient observation -> policy input batch."""
+
+    def _build_policy_observation(self, task_instruction: str) -> Dict[str, Any]:
+        """Capture Diffusion's observation window at the dataset frame rate."""
+        config = self._policy.config
+        if getattr(config, "type", None) != "diffusion":
+            return self._build_observation(task_instruction)
+
+        observations = []
+        for index in range(config.n_obs_steps):
+            if index:
+                time.sleep(max(0.0, deadline - time.monotonic()))
+            captured_at = time.monotonic()
+            observation = self._build_observation(task_instruction)
+            if "success" in observation:
+                return observation
+            observations.append(observation)
+            deadline = captured_at + self._observation_interval_s
+
+        batch = dict(observations[-1])
+        for key in config.input_features:
+            batch[key] = torch.stack([obs[key] for obs in observations], dim=1)
+        return batch
 
     def _build_observation(self, task_instruction: str) -> Dict[str, Any]:
         """Pull raw sensor data from RobotClient and build a policy batch."""

@@ -38,6 +38,7 @@ string robot_type
 string task_instruction
 string acceleration_mode
 string acceleration_engine_path
+float64 inference_hz
 """
 
 ENGINE_COMMAND_RESPONSE_DEF = """\
@@ -61,6 +62,7 @@ class EngineCommandRequest:
     task_instruction: str = ""
     acceleration_mode: str = ""
     acceleration_engine_path: str = ""
+    inference_hz: float = 0.0
 
 
 @dataclass
@@ -87,6 +89,7 @@ def request_from_message(message: Any) -> EngineCommandRequest:
         acceleration_engine_path=str(
             getattr(message, "acceleration_engine_path", "") or ""
         ),
+        inference_hz=float(getattr(message, "inference_hz", 0) or 0),
     )
 
 
@@ -129,6 +132,7 @@ def request_to_message_kwargs(request: EngineCommandRequest) -> dict:
         "task_instruction": str(request.task_instruction),
         "acceleration_mode": str(request.acceleration_mode),
         "acceleration_engine_path": str(request.acceleration_engine_path),
+        "inference_hz": float(request.inference_hz),
     }
 
 

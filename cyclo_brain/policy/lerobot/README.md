@@ -4,7 +4,78 @@
 
 LeRobot integration for Cyclo Intelligence. This folder contains the executor and Docker configuration for running LeRobot training and inference via Zenoh communication.
 
-## Folder Structure
+## Diffusion Task 0 inference (checkpoint 964000)
+
+This setup uses the existing Web GUI and the two-process LeRobot runtime.
+Diffusion observations are captured at the GUI's **Dataset FPS** and stacked
+as `(batch, n_obs_steps, ...)` before the saved processor pipelines run.
+Other policies keep their existing observation format.
+
+### Set up another PC
+
+From a PC with Docker and the NVIDIA Container Toolkit:
+
+```bash
+git clone --recurse-submodules https://github.com/lab-dream/dream_cyclo_intelligence.git
+cd dream_cyclo_intelligence
+mkdir -p docker/workspace/model/lerobot/diffusion_task0_964000
+# Replace /path/to/964000 with the manually transferred checkpoint directory.
+cp -a /path/to/964000/pretrained_model docker/workspace/model/lerobot/diffusion_task0_964000/
+bash docker/container.sh start
+bash docker/container.sh build-ui
+```
+
+Start the ROS services from the Physical AI Manager as usual. For a standalone
+PC without that manager, start them through the existing supervisor API:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:7100/services/orchestrator/start
+curl -fsS -X POST http://127.0.0.1:7100/services/cyclo_data/start
+```
+
+The configured Zenoh router must also be running. If there is no existing
+router, run the following in another terminal and leave it running:
+
+```bash
+docker exec -it cyclo_intelligence bash -lc \
+  'source /opt/ros/jazzy/setup.bash; ros2 run rmw_zenoh_cpp rmw_zenohd'
+```
+
+Transfer the entire `pretrained_model` directory, including `config.json`,
+`model.safetensors`, both `policy_*processor.json` files, and both processor
+statistics `.safetensors` files. Training state and the dataset are unnecessary
+for inference. `docker/workspace` and model weights are already ignored by Git.
+Keep a real copy inside this workspace; a symlink to a host-only path will not
+resolve inside the policy container.
+
+Open `http://<robot-pc>:7080`, select robot **ffw_sg2_rev1**, and open Inference:
+
+1. Select **Diffusion** under Model.
+2. Click **Use Task 0 · 964000 (30 FPS)**. It fills Policy Path,
+   Dataset FPS `30`, Control Hz `100`, and async action requests.
+3. Use the LeRobot Docker **Pull Image** / **Start** controls until both runtime
+   services are ready. Both policy processes must use this checkout's runtime;
+   restart `lerobot_server` when updating its internal protocol.
+4. Select **Simulation** or **Robot** using the existing GUI mode controls,
+   then start inference. Simulation uses robot sensor inputs and previews
+   predictions; Robot publishes actions to the robot.
+
+The container policy path is
+`/workspace/model/lerobot/diffusion_task0_964000/pretrained_model`.
+The folder browser can select a different manually copied checkpoint.
+This policy consumes four RGB cameras at `96 × 96`, two observations, and
+22 state values (arms, grippers, head, lift, mobile odometry). It returns eight
+22-dimensional actions per request using the checkpoint's eight DDIM steps.
+Dataset FPS denotes action waypoint timing and observation spacing, not the
+number of neural-network evaluations per second.
+
+When building the policy image from source instead of pulling it, use
+`bash docker/container.sh start-lerobot --build`; the helper detects the PC
+architecture. Both policy Dockerfiles explicitly install the diffusion extra.
+The engine changes are bind-mounted, so a policy image rebuild is unnecessary
+when the installed image already includes Diffusion dependencies.
+
+## Folder Structure (legacy executor documentation)
 
 ```
 cyclo_brain/policy/lerobot/

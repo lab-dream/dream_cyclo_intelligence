@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import math
 import os
 import sys
 from typing import Any, Dict, List, Optional
@@ -126,6 +127,7 @@ class LeRobotEngine(
         # expected size. If config doesn't expose a target shape for a
         # camera, we leave that image at native resolution.
         self._image_resize: Dict[str, tuple[int, int]] = {}
+        self._observation_interval_s = 1.0 / 30.0
 
     # ------------------------------------------------------------------ #
     # InferenceEngine API
@@ -145,6 +147,10 @@ class LeRobotEngine(
         robot_type = request.robot_type
 
         try:
+            observation_hz = float(getattr(request, "inference_hz", 0) or 30)
+            if not math.isfinite(observation_hz) or observation_hz <= 0:
+                observation_hz = 30.0
+            self._observation_interval_s = 1.0 / observation_hz
             # Auto-descend into ``pretrained_model/`` if the user pasted
             # a training-output root containing ``training_state/``
             # alongside (lerobot-train layout).
@@ -195,7 +201,7 @@ class LeRobotEngine(
         if not self.is_ready:
             return self._fail("Not in inference mode")
         try:
-            obs = self._build_observation(getattr(request, "task_instruction", ""))
+            obs = self._build_policy_observation(getattr(request, "task_instruction", ""))
             if "success" in obs:
                 return obs
 
