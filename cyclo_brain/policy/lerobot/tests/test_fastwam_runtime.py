@@ -142,6 +142,55 @@ class FastWamLoadingTest(unittest.TestCase):
         self.assertEqual(policy.eval_calls, 1)
 
 
+class DiffusionRepresentationTest(unittest.TestCase):
+    def make_runtime(self):
+        runtime = loading.LoadingMixin()
+        runtime._robot = object()
+        runtime._relative_eef = None
+        runtime._action_keys = ["arm_left", "arm_right", "head", "lift", "mobile"]
+        return runtime
+
+    def config(self, **fields):
+        return {
+            "type": "diffusion",
+            "input_features": {"observation.state": {"shape": [20]}},
+            "output_features": {"action": {"shape": [20]}},
+            **fields,
+        }
+
+    def test_twenty_dimensions_do_not_enable_relative_without_saved_marker(self):
+        for config in (self.config(), self.config(state=None)):
+            with self.subTest(config=config), tempfile.TemporaryDirectory() as model_path:
+                Path(model_path, "config.json").write_text(json.dumps(config))
+                runtime = self.make_runtime()
+                runtime._configure_relative_eef(model_path, "ffw_sg2_rev1")
+                self.assertIsNone(runtime._relative_eef)
+                self.assertIn("mobile", runtime._action_keys)
+
+    def test_saved_relative_marker_attaches_the_arm_ik_bridge(self):
+        adapter_module = types.ModuleType(f"{PACKAGE_NAME}.relative_eef")
+        adapter = types.SimpleNamespace(action_keys=["arm_left", "arm_right"])
+        adapter_module.RelativeEEFAdapter = mock.Mock(return_value=adapter)
+        with tempfile.TemporaryDirectory() as model_path, mock.patch.dict(
+            sys.modules, {adapter_module.__name__: adapter_module}
+        ):
+            Path(model_path, "config.json").write_text(json.dumps(self.config(state="relative")))
+            runtime = self.make_runtime()
+            runtime._configure_relative_eef(model_path, "ffw_sg2_rev1")
+            adapter_module.RelativeEEFAdapter.assert_called_once_with(
+                model_path, runtime._robot, "ffw_sg2_rev1"
+            )
+            self.assertIs(runtime._relative_eef, adapter)
+            self.assertEqual(runtime._action_keys, ["arm_left", "arm_right"])
+
+    def test_relative_marker_with_joint_dimensions_is_rejected(self):
+        config = self.config(state="relative", output_features={"action": {"shape": [22]}})
+        with tempfile.TemporaryDirectory() as model_path:
+            Path(model_path, "config.json").write_text(json.dumps(config))
+            with self.assertRaisesRegex(ValueError, "20-dimensional action"):
+                self.make_runtime()._configure_relative_eef(model_path, "ffw_sg2_rev1")
+
+
 class FakeChild:
     def __init__(self):
         self.to_calls = []

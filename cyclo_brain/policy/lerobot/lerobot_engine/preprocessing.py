@@ -48,6 +48,8 @@ class PreprocessingMixin:
         batch = dict(observations[-1])
         for key in config.input_features:
             batch[key] = torch.stack([obs[key] for obs in observations], dim=1)
+        if getattr(self, "_relative_eef", None) is not None:
+            batch = self._relative_eef.encode_observation(batch)
         return batch
 
     def _build_observation(self, task_instruction: str) -> Dict[str, Any]:
@@ -80,6 +82,12 @@ class PreprocessingMixin:
             tensor = torch.from_numpy(img.copy()).to(torch.float32) / 255.0
             tensor = tensor.permute(2, 0, 1).contiguous().unsqueeze(0)
             batch[policy_key] = tensor.to(self._device)
+
+        if getattr(self, "_relative_eef", None) is not None:
+            state = self._relative_eef.raw_state(joint_dict)
+            batch[_STATE_KEY] = torch.from_numpy(state).unsqueeze(0).to(self._device)
+            batch["task"] = [task_instruction or ""]
+            return batch
 
         state_parts: List[np.ndarray] = []
         for modality in self._state_modalities:

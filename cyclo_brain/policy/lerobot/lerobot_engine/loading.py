@@ -23,18 +23,19 @@ Owns:
 
 from __future__ import annotations
 
+import json
 import logging
+from dataclasses import fields
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
+import draccus
 import torch
-
-from .image_preprocessing import infer_image_resize_targets
-
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies import get_policy_class, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
 
+from .image_preprocessing import infer_image_resize_targets
 
 logger = logging.getLogger("lerobot_engine")
 
@@ -62,12 +63,11 @@ class LoadingMixin:
         model_path: str, device: torch.device
     ) -> tuple[PreTrainedPolicy, Any, Any]:
         """Load policy weights + saved pre/post processors."""
-        import json
-
         config_path = Path(model_path) / "config.json"
         if config_path.exists():
             with open(config_path) as f:
-                policy_type = json.load(f).get("type", "act")
+                saved_config = json.load(f)
+                policy_type = saved_config.get("type", "act")
         else:
             # ACT was the original default; fall back to it for
             # checkpoints saved before ``type`` started being recorded.
@@ -83,6 +83,17 @@ class LoadingMixin:
             policy_config = PreTrainedConfig.from_pretrained(model_path)
             policy_config.device = "cpu"
             policy = PolicyClass.from_pretrained(model_path, config=policy_config)
+        elif policy_type == "diffusion" and config_path.exists():
+            # Dream adds training representation/checkpointing/dtype fields.
+            # Older Cyclo images need only the model fields for inference;
+            # the saved `state` is handled separately by the EEF bridge.
+            supported = {field.name for field in fields(PolicyClass.config_class)}
+            for name in ("state", "gradient_checkpointing", "dtype"):
+                if name not in supported:
+                    saved_config.pop(name, None)
+            policy_config = draccus.decode(PreTrainedConfig, saved_config)
+            policy_config.device = str(device)
+            policy = PolicyClass.from_pretrained(model_path, config=policy_config, strict=True)
         else:
             policy = PolicyClass.from_pretrained(model_path)
 
@@ -113,6 +124,28 @@ class LoadingMixin:
         )
         logger.info("Pre/post processors loaded")
         return policy, preprocessor, postprocessor
+
+    def _configure_relative_eef(self, model_path: str, robot_type: str) -> None:
+        """Select the inference representation from the saved checkpoint, never its width."""
+        config_path = Path(model_path) / "config.json"
+        if not config_path.is_file():
+            return
+        saved = json.loads(config_path.read_text())
+        if saved.get("type") != "diffusion":
+            return
+        state = saved.get("state")
+        if state is None:
+            logger.info("Joint-action checkpoint; using the existing inference flow")
+            return
+        if state != "relative":
+            raise ValueError(f"Unsupported Diffusion state representation: {state!r}.")
+        for key, features in (("observation.state", saved["input_features"]), ("action", saved["output_features"])):
+            if features[key]["shape"] != [20]:
+                raise ValueError(f"Relative EEF checkpoint requires a 20-dimensional {key}.")
+        from .relative_eef import RelativeEEFAdapter
+
+        self._relative_eef = RelativeEEFAdapter(model_path, self._robot, robot_type)
+        self._action_keys = list(self._relative_eef.action_keys)
 
     def _infer_image_resize(self, policy: PreTrainedPolicy) -> Dict[str, Tuple[int, int]]:
         """Best-effort per-policy-key target ``(W, H)`` from config.

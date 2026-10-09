@@ -4,6 +4,66 @@
 
 LeRobot integration for Cyclo Intelligence. This folder contains the executor and Docker configuration for running LeRobot training and inference via Zenoh communication.
 
+## Dream relative EEF Diffusion inference
+
+Use the existing **Policy Path**, **Dataset FPS**, and Simulation/Robot controls.
+The engine reads `config.json`: Diffusion checkpoints with `"state": "relative"`
+use the EEF path; `"state": null` or an absent `state` keeps the joint-action path.
+The representation is never inferred from the action dimension.
+
+The EEF path reuses UMI's `get_real_umi_obs_dict` and `get_real_umi_action`:
+the latest measured TCP anchors the complete observation/action window,
+positions use meters, and rotations use UMI's row-based rot6d. Dream's copied
+FK and gripper scaling match its training transform. After the saved policy
+postprocessor, UMI restores absolute EE poses and Cyclo's existing
+`RobotKinematics.inverse_kinematics` converts them into ROS joint positions
+in radians. Only `arm_left` and `arm_right` are returned: seven joints plus
+one gripper each. The fixed-base model holds the measured lift and other joints
+fixed during IK. This training representation supports **ffw_sg2_rev1**.
+
+For a transferred relative checkpoint, include the **original joint dataset's**
+`meta/info.json` and `meta/stats.json` in `pretrained_model/dataset_meta/`:
+
+```bash
+POLICY_DIR=docker/workspace/model/lerobot/my_relative_policy/pretrained_model
+DATASET_DIR=/path/to/original_joint_dataset
+mkdir -p "$POLICY_DIR/dataset_meta"
+cp "$DATASET_DIR/meta/info.json" "$DATASET_DIR/meta/stats.json" "$POLICY_DIR/dataset_meta/"
+```
+
+These two small files provide the named joints and the separate observation/action
+gripper ranges. The relative normalizer files alone cannot recover those ranges.
+If the original dataset is still accessible at the `train_config.json` dataset
+root, the engine can read its metadata directly. Missing metadata fails LOAD
+with a specific message. Include all the saved policy/processor files as usual.
+
+The engine and copied helpers are bind-mounted. Existing policy images need
+`scipy` and a working `placo`/Pinocchio installation; both source Dockerfiles
+install SciPy explicitly and already include the IK dependencies via `hilserl`.
+Rebuild with `bash docker/container.sh start-lerobot --build` if those dependencies
+are absent, then select the checkpoint through the existing GUI.
+
+Local smoke validation used the real Task 0 dataset (episodes 0–1), 100 training
+steps, four 64×64 cameras, and a small Diffusion model. It checks UMI observations
+against Dream's training transform, identity-pose IK, LOAD/GET_ACTION/cached
+LOAD/UNLOAD, and RobotClient's arm-command slicing using replayed sensors and
+captured commands. Re-run inference with a Python environment containing
+LeRobot's dataset/diffusion/IK dependencies and SciPy:
+
+```bash
+python cyclo_brain/policy/lerobot/scripts/smoke_relative_eef.py \
+  docker/workspace/model/lerobot/relative_eef_smoke_20261010/checkpoints/000100 \
+  --dataset-root=/path/to/Task_0_tape_MCAP_lerobot_v30
+```
+
+This validation sends no commands to hardware and measures process compatibility,
+not task success after 100 training steps.
+The 100-step checkpoint returned three `(8, 16)` chunks and 48 captured arm
+commands. The existing non-relative checkpoint 964000 returned `(8, 22)`;
+switching joint → relative EEF → joint also passed. The targeted engine/runtime
+and Dockerfile regression tests passed (78 tests, plus two subtests).
+Local logs and results are under the smoke model's `validation/` directory.
+
 ## Diffusion Task 0 inference (checkpoint 964000)
 
 This setup uses the existing Web GUI and the two-process LeRobot runtime.

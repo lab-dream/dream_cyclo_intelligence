@@ -107,6 +107,9 @@ class IoMappingMixin:
         )
 
     def _teardown_robot(self) -> None:
+        if getattr(self, "_relative_eef", None) is not None:
+            self._relative_eef.close()
+            self._relative_eef = None
         if self._robot is not None:
             try:
                 self._robot.close()

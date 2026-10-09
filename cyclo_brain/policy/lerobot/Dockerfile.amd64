@@ -101,7 +101,7 @@ COPY lerobot/lerobot/ ./
 # IMPORTANT: eclipse-zenoh version MUST match rmw_zenoh_cpp's bundled
 # zenoh-c version (1.6.x). Mismatched versions cause service call
 # failures despite discovery working.
-RUN uv pip install "eclipse-zenoh>=1.6.0,<1.7.0" rosbags>=0.11.0 GitPython>=3.1.18 json5>=0.9.14 pyyaml \
+RUN uv pip install "eclipse-zenoh>=1.6.0,<1.7.0" rosbags>=0.11.0 GitPython>=3.1.18 json5>=0.9.14 pyyaml scipy \
     && mkdir -p /zenoh_sdk /robot_client_sdk /action_chunk_processing_sdk /orchestrator_config \
                 /policy_runtime /app
 

@@ -107,6 +107,7 @@ class LeRobotEngine(
         self._robot: Optional[RobotClient] = None
         self._device: Optional[torch.device] = None
         self._loaded_model_path: Optional[str] = None
+        self._relative_eef = None
 
         # Resolved after load: which cameras / joint groups feed which
         # policy keys. ``_cameras`` maps RobotClient camera name → policy
@@ -164,7 +165,6 @@ class LeRobotEngine(
             )
             if cache_hit:
                 logger.info("Reusing cached policy: %s", model_path)
-                self._teardown_robot()
             else:
                 logger.info("Loading LeRobot policy from: %s", model_path)
                 self._device = torch.device(
@@ -179,9 +179,11 @@ class LeRobotEngine(
                 self._loaded_model_path = model_path
                 self._apply_policy_optimization(model_path, request)
 
+            self._teardown_robot()
             self._init_robot(robot_type)
             self._loaded_robot_type = robot_type
             self._image_resize = self._infer_image_resize(self._policy)
+            self._configure_relative_eef(model_path, robot_type)
 
             return {
                 "success": True,
@@ -189,7 +191,7 @@ class LeRobotEngine(
                     "LeRobot inference restarted (policy cached)"
                     if cache_hit
                     else f"loaded {model_path}"
-                ),
+                ) + (" (relative EEF → IK)" if self._relative_eef is not None else ""),
                 "action_keys": list(self._action_keys),
             }
         except Exception as e:
@@ -211,6 +213,8 @@ class LeRobotEngine(
                 action = self._postprocessor(action)
 
             chunk = self._to_numpy_chunk(action)
+            if self._relative_eef is not None:
+                chunk = self._relative_eef.decode_action(chunk)
             T, D = chunk.shape
             logger.info("Action chunk: T=%d, D=%d", T, D)
             return {
