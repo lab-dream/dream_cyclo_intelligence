@@ -175,6 +175,31 @@ class InitialPoseSyncCommandTest(unittest.TestCase):
         np.testing.assert_allclose(message["points"][0].positions, expected)
         self.assertEqual(message["points"][0].time_from_start.nanosec, 100_000_000)
 
+    def test_relative_eef_action_publishes_one_lift_position_in_meters(self):
+        client = self._make_client("ffw_sg2_rev1")
+        action = np.concatenate([np.arange(16) * 0.01, [-0.25]])
+        client.publish_action(action, ["arm_left", "arm_right", "lift"])
+        for key, offset in (("arm_left", 0), ("arm_right", 8), ("lift", 16)):
+            messages = client._command_publishers[f"leader_{key}"].messages
+            self.assertEqual(len(messages), 1)
+            width = 1 if key == "lift" else 8
+            np.testing.assert_allclose(messages[0]["points"][0].positions, action[offset:offset + width])
+        self.assertEqual(client._command_publishers["leader_lift"].messages[0]["joint_names"], ["lift_joint"])
+        self.assertFalse(client._command_publishers["leader_head"].messages)
+        self.assertFalse(client._command_publishers["leader_mobile"].messages)
+
+    def test_relative_eef_initial_pose_sync_includes_the_shared_lift(self):
+        client = self._make_client("ffw_sg2_rev1")
+        self._seed_joint_state(client)
+        action = np.concatenate([np.arange(16) * 0.01, [-0.25]])
+        client.publish_initial_pose_sync(
+            action, ["arm_left", "arm_right", "lift"], duration_s=5.0
+        )
+        message = client._command_publishers["leader_lift"].messages[0]
+        self.assertEqual(message["joint_names"], ["lift_joint"])
+        np.testing.assert_allclose(message["points"][0].positions, [-0.25])
+        self.assertEqual(message["points"][0].time_from_start.sec, 5)
+
     def test_missing_current_joint_state_prevents_any_sync_command(self):
         client = self._make_client("omy_f3m")
         action_keys = list(client._action_keys)
@@ -285,6 +310,73 @@ class InitialPoseSyncCommandTest(unittest.TestCase):
             serialized_fields(messages.INFERENCE_COMMAND_REQUEST_DEF),
             serialized_fields(native_request),
         )
+
+
+class JointStateMappingTest(unittest.TestCase):
+    def setUp(self):
+        self.client = InitialPoseSyncCommandTest()._make_client("ffw_sg2_rev1")
+        self.parent = "follower_upper_body"
+        groups = self.client._config["joint_groups"]
+        self.children = [name for name, cfg in groups.items() if cfg.get("parent") == self.parent]
+        self.client._joint_children = {self.parent: self.children}
+        self.names = (
+            [f"arm_l_joint{i}" for i in range(1, 8)]
+            + [f"arm_r_joint{i}" for i in range(1, 8)]
+            + ["gripper_l_joint1", "gripper_r_joint1", "head_joint1", "head_joint2",
+               "left_wheel_drive", "left_wheel_steer", "lift_joint", "rear_wheel_drive",
+               "rear_wheel_steer", "right_wheel_drive", "right_wheel_steer"]
+        )
+
+    def update(self, names, position=None):
+        self.client._update_joint(
+            self.parent,
+            SimpleNamespace(
+                name=names,
+                position=list(range(len(names))) if position is None else position,
+                velocity=[100 + i for i in range(len(names))],
+                effort=[200 + i for i in range(len(names))],
+            ),
+        )
+
+    def test_extra_wheels_and_reordered_joints_match_every_configured_view(self):
+        self.update(self.names)
+        self.assertEqual(len(self.names), 25)
+        self.assertEqual(len(self.client.get_joint_positions(self.parent)), 19)
+        for view in [self.parent, *self.children]:
+            indices = [self.names.index(name) for name in self.client.get_joint_names(view)]
+            np.testing.assert_array_equal(self.client.get_joint_positions(view), indices)
+            np.testing.assert_array_equal(self.client.get_joint_velocities(view), np.array(indices) + 100)
+            np.testing.assert_array_equal(self.client.get_joint_efforts(view), np.array(indices) + 200)
+        self.assertEqual(self.client._joint_positions_by_name["gripper_l_joint1"], 14)
+        self.assertIn("left_wheel_drive", self.client._joint_positions_by_name)
+        self.assertTrue(all(not publisher.messages for publisher in self.client._command_publishers.values()))
+
+    def test_same_length_message_also_uses_names_instead_of_array_order(self):
+        names = list(reversed(self.client.get_joint_names(self.parent)))
+        self.update(names)
+        np.testing.assert_array_equal(self.client.get_joint_positions(self.parent), list(reversed(range(19))))
+
+    def test_missing_joint_removes_incomplete_views_instead_of_retaining_old_pose(self):
+        self.update(self.names)
+        self.update([name for name in self.names if name != "lift_joint"])
+        self.assertNotIn(self.parent, self.client.get_joint_positions())
+        self.assertNotIn("follower_lift", self.client.get_joint_positions())
+        self.assertNotIn(self.parent, self.client._joint_timestamps)
+        self.assertEqual(len(self.client.get_joint_positions("follower_arm_left")), 8)
+
+    def test_malformed_positions_do_not_create_truncated_or_stale_pose(self):
+        self.update(self.names)
+        timestamps = dict(self.client._joint_position_timestamps_by_name)
+        self.update(self.names, position=list(range(24)))
+        self.assertEqual(self.client.get_joint_positions(), {})
+        self.assertEqual(self.client._joint_position_timestamps_by_name, timestamps)
+
+    def test_duplicate_or_absent_names_cannot_be_used_as_joint_positions(self):
+        for names in (["arm_l_joint1"] * 25, []):
+            with self.subTest(names=names):
+                self.update(self.names)
+                self.update(names, position=list(range(25)))
+                self.assertEqual(self.client.get_joint_positions(), {})
 
 
 if __name__ == "__main__":

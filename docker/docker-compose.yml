@@ -163,6 +163,8 @@ services:
       # under lerobot/.
       context: ../cyclo_brain/policy
       dockerfile: lerobot/Dockerfile.${ARCH:-arm64}
+      additional_contexts:
+        cyclo_sdk: ../cyclo_brain/sdk
       # See cyclo_intelligence.build.network for why.
       network: host
       args:
@@ -188,6 +190,8 @@ services:
       # Main-runtime waits on the local engine process while weights and
       # first-time gated backbones download/load.
       - LOAD_POLICY_TIMEOUT_S=${LOAD_POLICY_TIMEOUT_S:-7200}
+      # Larger weights penalize lift motion more strongly in relative EEF IK.
+      - CYCLO_IK_LIFT_WEIGHT=${CYCLO_IK_LIFT_WEIGHT:-10.0}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - PYTHONUNBUFFERED=1

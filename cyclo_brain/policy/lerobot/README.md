@@ -15,11 +15,57 @@ The EEF path reuses UMI's `get_real_umi_obs_dict` and `get_real_umi_action`:
 the latest measured TCP anchors the complete observation/action window,
 positions use meters, and rotations use UMI's row-based rot6d. Dream's copied
 FK and gripper scaling match its training transform. After the saved policy
-postprocessor, UMI restores absolute EE poses and Cyclo's existing
-`RobotKinematics.inverse_kinematics` converts them into ROS joint positions
-in radians. Only `arm_left` and `arm_right` are returned: seven joints plus
-one gripper each. The fixed-base model holds the measured lift and other joints
-fixed during IK. This training representation supports **ffw_sg2_rev1**.
+postprocessor, UMI restores absolute EE poses. The official Cyclo
+`AIWorkerMoveLController` core coordinates both arm targets and their shared
+lift joint through a small Python binding. The command groups are `arm_left`, `arm_right`,
+and `lift`: eight values per arm (seven joints plus gripper), followed by one
+lift position, for 17 values total. Arm angles use radians and lift uses meters.
+The mobile base and head stay fixed; arm/lift URDF joint limits remain enabled.
+Lift velocity damping is configurable with `CYCLO_IK_LIFT_WEIGHT` (default
+`10.0`); arm damping stays `1e-4`. Increasing the lift weight penalizes lift
+motion more strongly, shifting motion toward the arms when feasible. The
+previous lift weight was `1e-6`, which strongly favored lift use. This weight
+multiplies squared lift velocity in the QP; it is not a usage percentage or a
+hard travel limit. Arm angles use radians and lift uses meters, so the raw
+weight ratio does not directly measure their share of motion.
+
+For example, set `CYCLO_IK_LIFT_WEIGHT=100` in `docker/.env` for stronger lift
+suppression, or `1` for more lift use than the new default. Recreate the
+LeRobot container so it receives the updated environment, then reload the
+policy. Once the updated binding is built, tuning this value needs no rebuild.
+The selected arm/lift weights are logged when an EEF policy is loaded.
+In an offline bent-arm example commanding both TCPs 30 mm upward, lift moved
+29.57 mm with the old `1e-6` weight, 5.93 mm with `10`, and 0.54 mm with `100`.
+Both targets remained within 0.1 mm position error. These results depend on
+posture and reachability; a weight is not a guarantee of a travel limit.
+
+Each waypoint starts from the previous solution (the first uses measured
+joints), applies up to 100 native QP updates with a 0.01 s internal step, and
+clamps active joint positions to their URDF limits. The saved 20-dimensional EEF policy and processors
+remain unchanged. This training representation supports **ffw_sg2_rev1**.
+
+EEF targets do not uniquely identify the demonstration's lift trajectory;
+the shared IK selects a compatible lift position. As in the earlier adapter,
+the portable training URDF has visual/collision geometry removed, so this
+inference bridge does not perform collision checking. The official Cyclo
+submodule itself is unchanged; only its FK/MoveL/QP sources are compiled.
+No ROS controller node or additional service is launched for IK.
+
+Initialize the pinned submodule, build the image, then stop inference and
+recreate `lerobot_server` through your existing deployment workflow before
+reloading the model:
+
+```bash
+git submodule update --init --recursive cyclo_brain/sdk/cyclo_control
+docker compose -f docker/docker-compose.yml build lerobot
+```
+
+For an existing container, the native module can also be built with
+`cyclo_brain/sdk/cyclo_ik/build.sh /opt/cyclo_ik` using that container's Python
+and SDK sources. Install `pybind11==2.13.6`, `cmeel-eigen==3.4.1`, and
+`cmeel-urdfdom-headers==1.1.2` first. The build uses the policy environment's
+Pinocchio, the submodule's vendored OsqpEigen, and OSQP 0.6.3. An unavailable
+binding fails LOAD explicitly; it does not fall back to Placo.
 
 For a transferred relative checkpoint, include the **original joint dataset's**
 `meta/info.json` and `meta/stats.json` in `pretrained_model/dataset_meta/`:
@@ -37,11 +83,9 @@ If the original dataset is still accessible at the `train_config.json` dataset
 root, the engine can read its metadata directly. Missing metadata fails LOAD
 with a specific message. Include all the saved policy/processor files as usual.
 
-The engine and copied helpers are bind-mounted. Existing policy images need
-`scipy` and a working `placo`/Pinocchio installation; both source Dockerfiles
-install SciPy explicitly and already include the IK dependencies via `hilserl`.
-Rebuild with `bash docker/container.sh start-lerobot --build` if those dependencies
-are absent, then select the checkpoint through the existing GUI.
+The engine and copied helpers are bind-mounted. Both source Dockerfiles install
+SciPy and build the native Cyclo binding against their Pinocchio installation.
+The SDK build context is supplied by Compose's `additional_contexts` entry.
 
 Local smoke validation used the real Task 0 dataset (episodes 0–1), 100 training
 steps, four 64×64 cameras, and a small Diffusion model. It checks UMI observations
@@ -58,11 +102,22 @@ python cyclo_brain/policy/lerobot/scripts/smoke_relative_eef.py \
 
 This validation sends no commands to hardware and measures process compatibility,
 not task success after 100 training steps.
-The 100-step checkpoint returned three `(8, 16)` chunks and 48 captured arm
-commands. The existing non-relative checkpoint 964000 returned `(8, 22)`;
+The earlier arm-only validation of the 100-step checkpoint returned three
+`(8, 16)` chunks and 48 captured arm commands. The existing non-relative
+checkpoint 964000 returned `(8, 22)`;
 switching joint → relative EEF → joint also passed. The targeted engine/runtime
 and Dockerfile regression tests passed (78 tests, plus two subtests).
 Local logs and results are under the smoke model's `validation/` directory.
+The current replay smoke script checks `(n_action_steps, 17)` chunks and captures
+both arm and lift commands without hardware publishers. Shared-lift IK tests
+also cover stationary poses, common vertical motion, differing arm goals, and
+lift joint limits:
+
+```bash
+docker exec -e PYTHONPATH=/app:/policy_runtime:/zenoh_sdk:/robot_client_sdk \
+  lerobot_server python3 -m unittest discover \
+  -s /app/lerobot_engine/tests -p test_relative_eef.py -v
+```
 
 ## Diffusion Task 0 inference (checkpoint 964000)
 

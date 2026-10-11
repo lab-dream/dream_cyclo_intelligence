@@ -7,3 +7,6 @@
 [submodule "cyclo_brain/policy/groot/Isaac-GR00T"]
 	path = cyclo_brain/policy/groot/Isaac-GR00T
 	url = https://github.com/ROBOTIS-GIT/Isaac-GR00T-n1.7.git
+[submodule "cyclo_brain/sdk/cyclo_control"]
+	path = cyclo_brain/sdk/cyclo_control
+	url = https://github.com/ROBOTIS-GIT/cyclo_control.git

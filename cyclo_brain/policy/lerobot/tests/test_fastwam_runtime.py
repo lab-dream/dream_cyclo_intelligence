@@ -169,7 +169,7 @@ class DiffusionRepresentationTest(unittest.TestCase):
 
     def test_saved_relative_marker_attaches_the_arm_ik_bridge(self):
         adapter_module = types.ModuleType(f"{PACKAGE_NAME}.relative_eef")
-        adapter = types.SimpleNamespace(action_keys=["arm_left", "arm_right"])
+        adapter = types.SimpleNamespace(action_keys=["arm_left", "arm_right", "lift"])
         adapter_module.RelativeEEFAdapter = mock.Mock(return_value=adapter)
         with tempfile.TemporaryDirectory() as model_path, mock.patch.dict(
             sys.modules, {adapter_module.__name__: adapter_module}
@@ -181,7 +181,7 @@ class DiffusionRepresentationTest(unittest.TestCase):
                 model_path, runtime._robot, "ffw_sg2_rev1"
             )
             self.assertIs(runtime._relative_eef, adapter)
-            self.assertEqual(runtime._action_keys, ["arm_left", "arm_right"])
+            self.assertEqual(runtime._action_keys, ["arm_left", "arm_right", "lift"])
 
     def test_relative_marker_with_joint_dimensions_is_rejected(self):
         config = self.config(state="relative", output_features={"action": {"shape": [22]}})

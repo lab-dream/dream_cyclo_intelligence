@@ -127,7 +127,7 @@ def main() -> None:
     )
     loaded = worker.handle(request)
     assert loaded.success, loaded.message
-    assert loaded.action_keys == ["arm_left", "arm_right"], loaded
+    assert loaded.action_keys == ["arm_left", "arm_right", "lift"], loaded
 
     # Compare the copied UMI observation conversion with Dream's training transform.
     adapter = engine._relative_eef
@@ -138,7 +138,7 @@ def main() -> None:
     batch = engine._build_policy_observation("")
     torch.testing.assert_close(batch["observation.state"][0].cpu(), expected)
 
-    # A zero relative pose must keep the measured arms and the locked lift.
+    # A zero relative pose must keep the measured arms and the shared lift.
     from lerobot_engine._vendor.dream.math import normalize
 
     identity = expected[-1].numpy().copy()
@@ -148,13 +148,12 @@ def main() -> None:
     identity[[9, 19]] = normalize(grippers, *adapter.transform.gripper_bounds["action"])
     restored = adapter.decode_action(identity[None])[0]
     for index, side in enumerate(("left", "right")):
-        solver = adapter.kinematics[side]
         np.testing.assert_allclose(
             restored[index * 8 : index * 8 + 7],
-            [adapter.measured[name] for name in solver.joint_names],
+            [adapter.measured[name] for name in adapter._arm_names[side]],
             atol=1e-6,
         )
-        assert solver.robot.get_joint("lift_joint") == adapter.measured["lift_joint"]
+    np.testing.assert_allclose(restored[16], adapter.measured["lift_joint"], atol=1e-6)
     np.testing.assert_allclose(restored[[7, 15]], grippers, atol=1e-6)
 
     chunks = []
@@ -166,15 +165,15 @@ def main() -> None:
         chunk = np.asarray(response.action_list).reshape(
             response.chunk_size, response.action_dim
         )
-        assert chunk.shape == (engine._policy.config.n_action_steps, 16), chunk.shape
+        assert chunk.shape == (engine._policy.config.n_action_steps, 17), chunk.shape
         assert np.isfinite(chunk).all()
         for action in chunk:
             engine._robot.publish_action(action, loaded.action_keys)
         chunks.append(list(chunk.shape))
     sent = engine._robot.sent
-    assert len(sent) == sum(shape[0] for shape in chunks) * 2
-    assert {topic for topic, _, _ in sent} == {"arm_left", "arm_right"}
-    assert all(len(names) == len(values) == 8 for _, names, values in sent)
+    assert len(sent) == sum(shape[0] for shape in chunks) * 3
+    assert {topic for topic, _, _ in sent} == {"arm_left", "arm_right", "lift"}
+    assert all(len(names) == len(values) == (1 if topic == "lift" else 8) for topic, names, values in sent)
     cached = worker.handle(request)
     assert cached.success and "cached" in cached.message, cached
     after_reload = worker.handle(EngineCommandRequest(command=CMD_GET_ACTION))
@@ -189,7 +188,8 @@ def main() -> None:
         "identity_pose_ik_roundtrip": True,
         "action_keys": loaded.action_keys,
         "chunks": chunks,
-        "captured_arm_commands": len(sent),
+        "captured_arm_commands": sum(topic != "lift" for topic, _, _ in sent),
+        "captured_lift_commands": sum(topic == "lift" for topic, _, _ in sent),
         "cached_reload": True,
         "unload": True,
         "hardware_publish": False,

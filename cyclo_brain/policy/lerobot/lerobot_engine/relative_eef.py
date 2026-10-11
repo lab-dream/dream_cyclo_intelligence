@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -11,7 +13,6 @@ from typing import Any
 
 import numpy as np
 import torch
-from lerobot.model.kinematics import RobotKinematics
 from lerobot.utils.constants import ACTION, OBS_STATE
 
 from ._vendor.dream.math import denormalize
@@ -25,13 +26,16 @@ logger = logging.getLogger("lerobot_engine")
 class RelativeEEFAdapter:
     """Keep one measured TCP anchor for the entire observation/action window."""
 
-    action_keys = ["arm_left", "arm_right"]
+    action_keys = ["arm_left", "arm_right", "lift"]
 
     def __init__(self, model_path: str, robot: Any, robot_type: str) -> None:
         if robot_type != "ffw_sg2_rev1":
             raise ValueError(
                 "Dream relative EEF checkpoints require robot_type=ffw_sg2_rev1."
             )
+        self.lift_weight = float(os.environ.get("CYCLO_IK_LIFT_WEIGHT", "10.0"))
+        if not np.isfinite(self.lift_weight) or self.lift_weight <= 0:
+            raise ValueError("CYCLO_IK_LIFT_WEIGHT must be positive and finite")
         metadata = self._metadata_dir(Path(model_path))
         features = json.loads((metadata / "info.json").read_text())["features"]
         stats = json.loads((metadata / "stats.json").read_text())
@@ -61,18 +65,35 @@ class RelativeEEFAdapter:
                 link.findall("collision")
             ):
                 link.remove(geometry)
-        # Placo's scalar joint API assumes nq=1. Continuous wheel joints use
-        # nq=2 in Pinocchio and shift its joint offsets; the base is fixed here.
+        # Cyclo's scalar q/qdot API needs nq=nv; continuous wheels use nq=2.
+        # The mobile base is fixed during EEF inference.
         for joint in tree.getroot().findall("joint"):
             if joint.get("type") == "continuous":
                 joint.set("type", "fixed")
         urdf_path = Path(self._urdf_dir.name) / "robot.urdf"
         tree.write(urdf_path)
-        self.kinematics: dict[str, RobotKinematics] = {}
         cfg = self.transform.config
-        for side, frame, names in (
-            ("left", cfg.left_ee_frame, cfg.left_arm_joint_names),
-            ("right", cfg.right_ee_frame, cfg.right_arm_joint_names),
+        self._arm_names = {
+            "left": list(cfg.left_arm_joint_names),
+            "right": list(cfg.right_arm_joint_names),
+        }
+        self._lift_name = cfg.lift_joint_name
+        lift_joint = tree.getroot().find(f"joint[@name='{self._lift_name}']")
+        if lift_joint is None or lift_joint.get("type") != "prismatic":
+            raise ValueError("Relative EEF lift IK requires a prismatic lift joint.")
+        lift_limit = lift_joint.find("limit")
+        if lift_limit is None or not {"lower", "upper"}.issubset(lift_limit.attrib):
+            raise ValueError("Relative EEF lift IK requires URDF lift position limits.")
+        self._lift_limits = (
+            float(lift_limit.get("lower")), float(lift_limit.get("upper"))
+        )
+        if not np.isfinite(self._lift_limits).all() or self._lift_limits[0] >= self._lift_limits[1]:
+            raise ValueError("Invalid URDF lift position limits.")
+        if robot._action_groups.get("lift", {}).get("joint_names") != [self._lift_name]:
+            raise ValueError("Relative EEF lift IK requires a lift action group.")
+        for side, names in (
+            ("left", cfg.left_arm_joint_names),
+            ("right", cfg.right_arm_joint_names),
         ):
             expected = [*names, f"gripper_{side[0]}_joint1"]
             actual = robot._action_groups[f"arm_{side}"]["joint_names"]
@@ -80,17 +101,29 @@ class RelativeEEFAdapter:
                 raise ValueError(
                     f"Unexpected arm_{side} command joint order: {actual}."
                 )
-            solver = RobotKinematics(str(urdf_path), frame, list(names))
-            for name in solver.robot.joint_names():
-                if name not in names:
-                    solver.solver.mask_dof(name)
-                    # A measured, locked head/lift/gripper must not make arm IK
-                    # infeasible because its sensor value exceeds a URDF limit.
-                    solver.robot.set_joint_limits(name, -1e6, 1e6)
-            solver.solver.enable_joint_limits(True)
-            self.kinematics[side] = solver
+        # Both TCP targets share one lift in the official Cyclo MoveL QP core.
+        # Revolute joints use radians; the prismatic lift uses meters.
+        active_names = [
+            *self._arm_names["left"], *self._arm_names["right"], self._lift_name
+        ]
+        self._active_names = active_names
+        native_path = os.environ.get("CYCLO_IK_MODULE_PATH", "/opt/cyclo_ik")
+        if native_path not in sys.path:
+            sys.path.insert(0, native_path)
+        try:
+            from _cyclo_ik import CycloIK
+        except ImportError as error:
+            raise RuntimeError(
+                "Cyclo native IK binding is unavailable. Initialize the cyclo_control "
+                "submodule and rebuild the LeRobot image (or run sdk/cyclo_ik/build.sh)."
+            ) from error
+        self.kinematics = CycloIK(
+            str(urdf_path), active_names, [cfg.left_ee_frame, cfg.right_ee_frame],
+            self.lift_weight,
+        )
         logger.info(
-            "Relative EEF metadata: %s; UMI pose decoding + Cyclo IK enabled", metadata
+            "Relative EEF metadata: %s; Cyclo IK damping: arm=1e-4, lift=%g",
+            metadata, self.lift_weight,
         )
 
     @staticmethod
@@ -142,7 +175,11 @@ class RelativeEEFAdapter:
         return state
 
     def encode_observation(self, batch: dict[str, Any]) -> dict[str, Any]:
-        """Use UMI's observation conversion with Dream's FK and gripper scaling."""
+        """Encode past poses as inv(T_current) @ T_past, using the latest frame.
+
+        UMI keeps this same current TCP anchor in ``env_obs`` for decoding the
+        predicted action window. Grippers retain Dream's scalar range scaling.
+        """
         tensor = batch[OBS_STATE]
         joints = tensor[0].detach().cpu().numpy()
         poses = self.transform.poses(joints, OBS_STATE)
@@ -174,7 +211,7 @@ class RelativeEEFAdapter:
         return batch
 
     def decode_action(self, chunk: np.ndarray) -> np.ndarray:
-        """Restore UMI absolute poses, then solve the existing Cyclo arm IK."""
+        """Restore absolute TCP poses and return arms/grippers + shared lift."""
         if chunk.ndim != 2 or chunk.shape[1] != 20 or not np.isfinite(chunk).all():
             raise ValueError(
                 "Expected finite relative EEF actions of shape (time, 20)."
@@ -187,38 +224,43 @@ class RelativeEEFAdapter:
         lower, upper = self.transform.gripper_bounds[ACTION]
         grippers = denormalize(np.clip(action[:, [6, 13]], -1, 1), lower, upper)
         commands = []
-        seeds = {
-            side: np.asarray([self.measured[name] for name in solver.joint_names])
-            for side, solver in self.kinematics.items()
-        }
+        seed = {name: self.measured[name] for name in self._active_names}
         for waypoint in range(len(action)):
-            arms = []
+            poses = {
+                side: pose_to_mat(action[waypoint, index * 7 : index * 7 + 6])
+                for index, side in enumerate(("left", "right"))
+            }
+            seed = self._solve_bimanual(poses, seed)
+            command = []
             for index, side in enumerate(("left", "right")):
-                solver = self.kinematics[side]
-                for name in solver.robot.joint_names():
-                    if name in self.measured:
-                        solver.robot.set_joint(name, float(self.measured[name]))
-                pose = pose_to_mat(action[waypoint, index * 7 : index * 7 + 6])
-                seed = np.rad2deg(
-                    seeds[side]
-                )  # Cyclo IK's API uses degrees; ROS uses radians.
-                solver.forward_kinematics(seed)
-                for _ in range(20):
-                    seed = solver.inverse_kinematics(seed, pose, orientation_weight=1.0)
-                    reached = solver.robot.get_T_world_frame(solver.target_frame_name)
-                    if (
-                        np.linalg.norm(reached[:3, 3] - pose[:3, 3]) < 1e-4
-                        and np.linalg.norm(reached[:3, :3] - pose[:3, :3]) < 1e-3
-                    ):
-                        break
-                seeds[side] = np.deg2rad(seed)
-                arms.extend([*seeds[side], grippers[waypoint, index]])
-            commands.append(arms)
+                command.extend(
+                    [*[seed[name] for name in self._arm_names[side]], grippers[waypoint, index]]
+                )
+            command.append(seed[self._lift_name])
+            commands.append(command)
         result = np.asarray(commands, dtype=np.float64)
         if not np.isfinite(result).all():
             raise ValueError("IK produced non-finite joint commands.")
         return result
 
+    def _solve_bimanual(
+        self, poses: dict[str, np.ndarray], seed: dict[str, float]
+    ) -> dict[str, float]:
+        """Solve both targets together, preserving SI units and URDF limits."""
+        lower, upper = self._lift_limits
+        result, position_error, rotation_error = self.kinematics.solve(
+            {**self.measured, **seed}, poses["left"], poses["right"]
+        )
+        if position_error >= 1e-4 or rotation_error >= 1e-3:
+            logger.debug("Cyclo IK residual: position=%.6fm, rotation=%.6frad",
+                         position_error, rotation_error)
+        if not np.isfinite(list(result.values())).all():
+            raise ValueError("Shared arm/lift IK produced non-finite joint commands.")
+        if not lower - 1e-8 <= result[self._lift_name] <= upper + 1e-8:
+            raise ValueError("Shared arm/lift IK exceeded the lift joint limits.")
+        result[self._lift_name] = float(np.clip(result[self._lift_name], lower, upper))
+        return result
+
     def close(self) -> None:
-        self.kinematics.clear()
+        self.kinematics = None
         self._urdf_dir.cleanup()

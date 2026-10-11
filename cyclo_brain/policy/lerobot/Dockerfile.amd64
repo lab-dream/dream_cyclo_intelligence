@@ -11,7 +11,7 @@
 # container can be iterated without rebuilds.
 #
 # Build context: cyclo_brain/policy/        (NOTE: parent of lerobot/)
-# Usage:         docker build -f lerobot/Dockerfile.amd64 \
+# Usage:         docker build --build-context cyclo_sdk=../sdk -f lerobot/Dockerfile.amd64 \
 #                  -t robotis/lerobot-zenoh:1.4.1-amd64 .
 
 # NVIDIA PyTorch base image (Python 3.12 — required by upstream lerobot
@@ -95,6 +95,12 @@ RUN if [ "$GPU_ARCH" = "blackwell" ]; then \
 
 # Copy the rest of LeRobot (configs, tests, etc.)
 COPY lerobot/lerobot/ ./
+
+# Thin Python binding to the pinned, unchanged Cyclo control submodule.
+COPY --from=cyclo_sdk cyclo_control /opt/cyclo_sdk/cyclo_control
+COPY --from=cyclo_sdk cyclo_ik /opt/cyclo_sdk/cyclo_ik
+RUN uv pip install pybind11==2.13.6 cmeel-eigen==3.4.1 cmeel-urdfdom-headers==1.1.2 \
+    && bash /opt/cyclo_sdk/cyclo_ik/build.sh /opt/cyclo_ik
 
 # Zenoh + runtime Python deps. zenoh_ros2_sdk / robot_client /
 # action_chunk_processing come in via bind-mount (see docker-compose.yml).

@@ -380,73 +380,56 @@ class RobotClient:
     def _update_joint(self, group_name: str, msg):
         """JointState -> np.ndarray(float32).
 
-        Stores the full vector under ``group_name``. If the group has
-        synthetic children (other yaml groups with ``parent: <group_name>``),
-        slice each child's positions out of the message by joint name and
-        store the slice under the child's group name too — so callers
-        like ``get_joint_positions("follower_arm_left")`` see the same
-        per-modality surface as before the upper-body collapse.
+        Both physical groups and synthetic children follow their configured
+        ``joint_names`` order. A message may include extra joints (e.g. wheels)
+        or a different order; its ``name`` array is the source of the mapping.
+        Incomplete views are removed rather than retaining an older pose.
         """
         try:
-            msg_names = list(msg.name) if hasattr(msg, 'name') else []
-            position = list(msg.position) if hasattr(msg.position, '__iter__') else []
-            velocity = list(msg.velocity) if hasattr(msg.velocity, '__iter__') else []
-            effort = list(msg.effort) if hasattr(msg.effort, '__iter__') else []
+            msg_names = list(getattr(msg, "name", []))
+            position = list(getattr(msg, "position", []))
+            velocity = list(getattr(msg, "velocity", []))
+            effort = list(getattr(msg, "effort", []))
             now = time.time()
             received_monotonic = time.monotonic()
+            valid_names = bool(msg_names) and len(set(msg_names)) == len(msg_names)
+            valid_position = valid_names and len(position) == len(msg_names)
+            name_to_idx = {name: index for index, name in enumerate(msg_names)}
+            children = getattr(self, "_joint_children", {}).get(group_name, [])
             with self._lock:
-                if position:
-                    self._joint_positions[group_name] = np.array(position, dtype=np.float32)
-                    if msg_names:
-                        self._joint_positions_by_name.update(
-                            {
-                                name: float(value)
-                                for name, value in zip(msg_names, position)
-                            }
-                        )
-                        self._joint_position_timestamps_by_name.update(
-                            {
-                                name: received_monotonic
-                                for name, _value in zip(msg_names, position)
-                            }
-                        )
-                if velocity:
-                    self._joint_velocities[group_name] = np.array(velocity, dtype=np.float32)
-                if effort:
-                    self._joint_efforts[group_name] = np.array(effort, dtype=np.float32)
-                self._joint_timestamps[group_name] = now
+                if valid_position:
+                    self._joint_positions_by_name.update(
+                        {
+                            name: float(value)
+                            for name, value in zip(msg_names, position, strict=True)
+                        }
+                    )
+                    self._joint_position_timestamps_by_name.update(
+                        {name: received_monotonic for name in msg_names}
+                    )
+                elif position:
+                    logger.warning("Invalid JointState names/positions from %s", group_name)
 
-                # Propagate to synthetic child views.
-                children = getattr(self, "_joint_children", {}).get(group_name, [])
-                if children and msg_names:
-                    name_to_idx = {n: i for i, n in enumerate(msg_names)}
-                    for child in children:
-                        child_cfg = self._config["joint_groups"].get(child, {})
-                        wanted = child_cfg.get("joint_names", [])
-                        try:
-                            indices = [name_to_idx[n] for n in wanted]
-                        except KeyError as missing:
-                            # First few callbacks may race ahead of full
-                            # name list — skip this child until the parent
-                            # message carries every joint we expect.
-                            logger.debug(
-                                f"{child}: joint {missing} missing from "
-                                f"{group_name} message"
+                for view in [group_name, *children]:
+                    cfg = self._config["joint_groups"].get(view, {})
+                    wanted = cfg.get("joint_names", []) or msg_names
+                    indices = [name_to_idx[name] for name in wanted if name in name_to_idx]
+                    complete = valid_names and len(indices) == len(wanted)
+                    for values, store in (
+                        (position, self._joint_positions),
+                        (velocity, self._joint_velocities),
+                        (effort, self._joint_efforts),
+                    ):
+                        if complete and len(values) == len(msg_names):
+                            store[view] = np.asarray(
+                                [values[index] for index in indices], dtype=np.float32
                             )
-                            continue
-                        if position:
-                            self._joint_positions[child] = np.array(
-                                [position[i] for i in indices], dtype=np.float32
-                            )
-                        if velocity and len(velocity) == len(msg_names):
-                            self._joint_velocities[child] = np.array(
-                                [velocity[i] for i in indices], dtype=np.float32
-                            )
-                        if effort and len(effort) == len(msg_names):
-                            self._joint_efforts[child] = np.array(
-                                [effort[i] for i in indices], dtype=np.float32
-                            )
-                        self._joint_timestamps[child] = now
+                        else:
+                            store.pop(view, None)
+                    if complete and valid_position:
+                        self._joint_timestamps[view] = now
+                    else:
+                        self._joint_timestamps.pop(view, None)
         except Exception as e:
             logger.warning(f"Failed to parse joint from {group_name}: {e}")
 
