@@ -14,11 +14,12 @@ know about the control loop, command publishing, or external lifecycle service.
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import sys
 import threading
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any
 
 _ZENOH_SDK_PATH = os.environ.get("ZENOH_SDK_PATH", "/zenoh_sdk")
 if os.path.exists(_ZENOH_SDK_PATH) and _ZENOH_SDK_PATH not in sys.path:
@@ -28,6 +29,9 @@ from .protocol import (
     CMD_GET_ACTION,
     CMD_LOAD_POLICY,
     CMD_UNLOAD_POLICY,
+    CMD_LOAD_DATASET_SIMULATION,
+    CMD_STEP_DATASET_SIMULATION,
+    CMD_UNLOAD_DATASET_SIMULATION,
     ENGINE_COMMAND_REQUEST_DEF,
     ENGINE_COMMAND_RESPONSE_DEF,
     EngineCommandRequest,
@@ -62,14 +66,26 @@ class EngineWorker:
         self._engine = engine
         self._service = None
         self._shutdown = threading.Event()
+        self._command_lock = threading.RLock()
 
     def handle(self, request: Any) -> EngineCommandResponse:
+        with self._command_lock:
+            return self._handle(request)
+
+    def _handle(self, request: Any) -> EngineCommandResponse:
         req = (
             request
             if isinstance(request, EngineCommandRequest)
             else request_from_message(request)
         )
         try:
+            if req.command in (CMD_LOAD_DATASET_SIMULATION, CMD_STEP_DATASET_SIMULATION,
+                               CMD_UNLOAD_DATASET_SIMULATION):
+                state = self._engine.dataset_simulation_command(req)
+                return EngineCommandResponse(success=True, seq_id=req.seq_id,
+                                             simulation_state=json.dumps(state, allow_nan=False))
+            if getattr(self._engine, "_dataset_simulation", None) is not None:
+                raise RuntimeError("Unload dataset simulation before starting live inference.")
             if req.command == CMD_LOAD_POLICY:
                 return self._load_policy(req)
             if req.command == CMD_GET_ACTION:

@@ -36,6 +36,7 @@ from lerobot_engine import (
     LeRobotEngine,  # noqa: E402
     io_mapping,  # noqa: E402
 )
+from lerobot_engine.image_preprocessing import apply_rotation  # noqa: E402
 from robot_client import RobotClient  # noqa: E402
 from robot_client.robot_client import derive_robot_config  # noqa: E402
 from shared.robot_configs import schema  # noqa: E402
@@ -84,9 +85,9 @@ def main() -> None:
                     sample[f"observation.images.rgb.{camera}"].permute(1, 2, 0).numpy()
                 )
                 # Dataset wrist frames already carry the recorder's rotation.
-                images[camera] = np.rot90(
+                images[camera] = apply_rotation(
                     np.rint(image * 255).astype(np.uint8),
-                    -int(cfg.get("rotation_deg", 0)) // 90,
+                    -int(cfg.get("rotation_deg", 0)),
                 ).copy()
             return images
 

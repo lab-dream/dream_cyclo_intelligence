@@ -53,6 +53,8 @@ export default function useUrdfRobot(urdfPath, endEffectorLinks = []) {
     setError(null);
 
     const loader = new URDFLoader();
+    // URDFs are editable; bypass nginx's cached copy when loading/reloading a model.
+    loader.fetchOptions = { cache: 'no-store' };
     const stlLoader = new STLLoader();
 
     loader.packages = {
@@ -162,24 +164,27 @@ export default function useUrdfRobot(urdfPath, endEffectorLinks = []) {
   useEffect(() => {
     loadRobot();
     return () => {
-      if (robotRef.current) {
-        robotRef.current.traverse((child) => {
-          if (child.isMesh) {
-            child.geometry?.dispose();
-            if (child.material) {
-              if (Array.isArray(child.material)) {
-                child.material.forEach((m) => m.dispose());
-              } else {
-                child.material.dispose();
-              }
-            }
-          }
-        });
-        robotRef.current = null;
-      }
+      robotRef.current = null;
       fkSolverRef.current = null;
     };
   }, [loadRobot]);
+
+  useEffect(() => () => {
+    if (robot) {
+      robot.traverse((child) => {
+        if (child.isMesh) {
+          child.geometry?.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach((m) => m.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        }
+      });
+    }
+  }, [robot]);
 
   const setJointValues = useCallback((jointData) => {
     const r = robotRef.current;

@@ -29,6 +29,7 @@ import InlineSystemStatus from '../components/InlineSystemStatus';
 import ImageGrid from '../components/ImageGrid';
 import RobotViewer3D from '../components/RobotViewer3D';
 import InferencePanel from '../components/InferencePanel';
+import DatasetSimulationPanel, { DatasetSimulationImages } from '../components/DatasetSimulationPanel';
 import RecordTopicMonitor from '../components/RecordTopicMonitor';
 import { selectInferenceTaskInfo } from '../features/tasks/taskSlice';
 import { setIsFirstLoadFalse } from '../features/ui/uiSlice';
@@ -48,6 +49,9 @@ export default function InferencePage({ isActive = true }) {
 
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [show3DViewer, setShow3DViewer] = useState(true);
+  const [datasetSimulation, setDatasetSimulation] = useState(false);
+  const [simulationFrame, setSimulationFrame] = useState(null);
+  const [simulationLoaded, setSimulationLoaded] = useState(false);
 
   const isFirstLoad = useSelector((state) => state.ui.isFirstLoad.inference);
 
@@ -186,20 +190,22 @@ export default function InferencePage({ isActive = true }) {
               )}
               <InlineSystemStatus />
               <div className="flex-grow" />
-              <InferenceControlPanel />
+              {!datasetSimulation && <InferenceControlPanel />}
             </div>
             <div className={classHeartbeatStatus}>
               <HeartbeatStatus />
             </div>
-            <ImageGrid isActive={isActive} />
+            {datasetSimulation ? <DatasetSimulationImages frame={simulationFrame} /> : <ImageGrid isActive={isActive} />}
           </div>
           <div className="flex-[4] min-h-[120px] flex flex-row items-center justify-center mx-1 gap-2 h-full relative">
             {show3DViewer && (
               <div className="h-[85%] rounded-2xl overflow-hidden relative" style={{ aspectRatio: '4/3' }}>
                 <RobotViewer3D
-                  mode="live"
-                  showSourceSelector
+                  mode={datasetSimulation ? 'dataset' : 'live'}
+                  showSourceSelector={!datasetSimulation}
                   defaultVisualizationSource={isRobotMode ? 'state' : 'action'}
+                  controlledJointState={simulationFrame?.joint_state}
+                  eefData={simulationFrame}
                 />
               </div>
             )}
@@ -236,7 +242,10 @@ export default function InferencePage({ isActive = true }) {
           </button>
           <div className={classRightPanel}>
             <div className="w-full min-h-10"></div>
-            <InferencePanel />
+            <DatasetSimulationPanel enabled={datasetSimulation} active={isActive} onEnabledChange={setDatasetSimulation} onFrame={setSimulationFrame} onSessionChange={setSimulationLoaded} />
+            <fieldset disabled={simulationLoaded} className="w-full flex justify-center">
+              <InferencePanel />
+            </fieldset>
           </div>
         </div>
       </div>

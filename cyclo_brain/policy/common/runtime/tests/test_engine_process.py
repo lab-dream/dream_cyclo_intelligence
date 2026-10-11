@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -57,6 +58,22 @@ class FakeEngine:
 
 
 class EngineWorkerTests(unittest.TestCase):
+    def test_dataset_simulation_is_serialized_and_blocks_live_commands(self):
+        engine = FakeEngine()
+        def simulate(request):
+            engine._dataset_simulation = None if request.command == 5 else object()
+            return {"hardware_publish": False, "frame": 8}
+        engine.dataset_simulation_command = simulate
+        worker = EngineWorker(engine)
+        loaded = worker.handle(EngineCommandRequest(command=3))
+        self.assertTrue(loaded.success)
+        self.assertFalse(json.loads(loaded.simulation_state)["hardware_publish"])
+        denied = worker.handle(EngineCommandRequest(command=CMD_LOAD_POLICY))
+        self.assertFalse(denied.success)
+        self.assertIn("Unload dataset simulation", denied.message)
+        self.assertIsNone(engine.loaded_with)
+        self.assertTrue(worker.handle(EngineCommandRequest(command=5)).success)
+
     def test_load_policy_delegates_to_engine(self) -> None:
         engine = FakeEngine()
         worker = EngineWorker(engine)

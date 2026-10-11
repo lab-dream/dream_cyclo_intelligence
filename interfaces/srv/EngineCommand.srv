@@ -7,6 +7,9 @@
 uint8 LOAD_POLICY   = 0
 uint8 GET_ACTION    = 1
 uint8 UNLOAD_POLICY = 2
+uint8 LOAD_DATASET_SIMULATION = 3
+uint8 STEP_DATASET_SIMULATION = 4
+uint8 UNLOAD_DATASET_SIMULATION = 5
 
 uint8 command
 
@@ -22,6 +25,8 @@ string task_instruction
 string acceleration_mode
 string acceleration_engine_path
 float64 inference_hz
+# Dataset simulation only: JSON with dataset_path, episode, and initial frame.
+string simulation_config
 ---
 uint64 seq_id
 bool success
@@ -35,3 +40,5 @@ string[] action_keys
 int32 chunk_size
 int32 action_dim
 float64[] action_list
+# Dataset simulation only: joints, dataset images, and relative/absolute EEF poses.
+string simulation_state

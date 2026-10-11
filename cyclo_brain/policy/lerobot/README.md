@@ -87,6 +87,51 @@ The engine and copied helpers are bind-mounted. Both source Dockerfiles install
 SciPy and build the native Cyclo binding against their Pinocchio installation.
 The SDK build context is supplied by Compose's `additional_contexts` entry.
 
+### Dataset feedback simulation in Inference
+
+Keep the existing Policy Path, select **Simulation** and the LeRobot backend,
+then enable **Dataset feedback simulation** in the Inference sidebar. Enter a
+LeRobot dataset path, episode, and initial frame, and click **Load / Reset**.
+Both paths must be accessible inside the LeRobot container (normally under
+`/workspace`). Checkpoint metadata retains the original gripper ranges. If that
+metadata is missing, select the original joint training dataset so the engine
+can read it there; another test dataset requires bundled training metadata.
+
+**Step chunk** runs one prediction and displays every resulting joint state.
+**Run** repeats prediction and playback; **Pause after chunk** lets the current
+chunk finish. **Unload** releases the model and lets you change/reset the inputs.
+Turning the checkbox off also finishes any in-flight chunk, unloads the dataset
+session, and restores the normal inference controls in one action.
+Unload normal inference before entering this mode. The normal lifecycle controls
+are hidden during dataset simulation, and the engine rejects live commands until
+the dataset session is unloaded.
+
+After updating an existing deployment, rebuild the ROS `interfaces` package
+(including `EngineCommand.srv`) and the UI, then restart the ROS bridge and
+LeRobot runtime so both ends use the updated service definition.
+
+The first observation window comes from the selected episode, ending at the
+initial frame; frames before episode start are padded with its first sample.
+Afterward, the existing UMI decoder and Cyclo shared arm/lift IK produce joint
+commands. Each command replaces the simulated arms, grippers, and lift state;
+the last `n_obs_steps` simulated states feed the next prediction. Head and base
+retain their initial values. Camera images advance one recorded dataset frame
+per applied command. The last frame ends the rollout. This tests state feedback
+with recorded images, rather than rendering cameras or simulating task physics.
+
+The existing 3D viewer shows the simulated robot and EEF targets with orientation
+axes: **Observation** in blue, **Action** in orange. **Robot** shows restored
+absolute poses; **Relative TCP** shows both relative to their latest observed
+TCP anchors, with left/right origins separated by a display offset. This is the
+same anchor used to decode each action chunk. Simulation creates no live sensor
+subscriptions or robot publishers and sends no hardware commands.
+
+Dataset LOAD/STEP/UNLOAD reuse the EngineCommand service with dedicated commands
+and JSON simulation fields. After updating the source, rebuild the orchestrator's
+ROS `interfaces` package and UI, and recreate the LeRobot backend so both sides
+use the updated service definition. The existing policy and IK dependencies are
+sufficient; the LeRobot submodule, UMI helpers, and IK core are unchanged.
+
 Local smoke validation used the real Task 0 dataset (episodes 0–1), 100 training
 steps, four 64×64 cameras, and a small Diffusion model. It checks UMI observations
 against Dream's training transform, identity-pose IK, LOAD/GET_ACTION/cached

@@ -36,7 +36,18 @@ class RelativeEEFAdapter:
         self.lift_weight = float(os.environ.get("CYCLO_IK_LIFT_WEIGHT", "10.0"))
         if not np.isfinite(self.lift_weight) or self.lift_weight <= 0:
             raise ValueError("CYCLO_IK_LIFT_WEIGHT must be positive and finite")
-        metadata = self._metadata_dir(Path(model_path))
+        dataset_root = getattr(robot, "dataset_root", None)
+        try:
+            metadata = self._metadata_dir(Path(model_path))
+        except FileNotFoundError:
+            if dataset_root is None:
+                raise
+            # A transferred checkpoint may omit its metadata. In that case the
+            # simulation must use its original training dataset, not test-set stats.
+            training = json.loads((Path(model_path) / "train_config.json").read_text())["dataset"]
+            if training.get("repo_id", "").split("/")[-1] != Path(dataset_root).name:
+                raise ValueError("Bundle original training dataset_meta before using another simulation dataset.")
+            metadata = Path(dataset_root) / "meta"
         features = json.loads((metadata / "info.json").read_text())["features"]
         stats = json.loads((metadata / "stats.json").read_text())
         self.transform = RelativeEEFTransform(features, stats)

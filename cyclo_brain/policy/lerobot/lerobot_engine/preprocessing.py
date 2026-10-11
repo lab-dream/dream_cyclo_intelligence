@@ -31,6 +31,8 @@ class PreprocessingMixin:
     def _build_policy_observation(self, task_instruction: str) -> Dict[str, Any]:
         """Capture Diffusion's observation window at the dataset frame rate."""
         config = self._policy.config
+        if getattr(self, "_dataset_simulation", None) is not None:
+            return self._dataset_simulation.build_observation(self, task_instruction)
         if getattr(config, "type", None) != "diffusion":
             return self._build_observation(task_instruction)
 

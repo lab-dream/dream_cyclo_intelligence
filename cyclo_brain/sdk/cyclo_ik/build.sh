@@ -15,6 +15,7 @@ if [ ! -f "$cyclo_deps_dir/lib/cmake/osqp/osqp-config.cmake" ]; then
     git clone --branch v0.6.3 --depth 1 --recurse-submodules https://github.com/osqp/osqp.git "$cyclo_build_dir/osqp"
   fi
   cmake -S "$cyclo_build_dir/osqp" -B "$cyclo_build_dir/osqp-build" \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$cyclo_deps_dir" \
     -DUNITTESTS=OFF -DPRINTING=OFF
   cmake --build "$cyclo_build_dir/osqp-build" -j2

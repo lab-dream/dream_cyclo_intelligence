@@ -180,10 +180,15 @@ class LeRobotEngine(
                 self._apply_policy_optimization(model_path, request)
 
             self._teardown_robot()
-            self._init_robot(robot_type)
+            dataset_robot = getattr(request, "dataset_robot", None)
+            if dataset_robot is None:
+                self._init_robot(robot_type)
+            else:
+                self._init_robot(robot_type, dataset_robot)
             self._loaded_robot_type = robot_type
             self._image_resize = self._infer_image_resize(self._policy)
             self._configure_relative_eef(model_path, robot_type)
+            self._dataset_simulation = dataset_robot
 
             return {
                 "success": True,
@@ -213,6 +218,8 @@ class LeRobotEngine(
                 action = self._postprocessor(action)
 
             chunk = self._to_numpy_chunk(action)
+            if getattr(self, "_dataset_simulation", None) is not None:
+                self._dataset_simulation.relative_action = chunk.copy()
             if self._relative_eef is not None:
                 chunk = self._relative_eef.decode_action(chunk)
             T, D = chunk.shape
@@ -230,6 +237,11 @@ class LeRobotEngine(
         except Exception as e:
             logger.error("get_action_chunk failed: %s", e, exc_info=True)
             return self._fail(str(e))
+
+    def dataset_simulation_command(self, request: Any) -> Dict[str, Any]:
+        from .dataset_simulation import dataset_simulation_command
+
+        return dataset_simulation_command(self, request)
 
     def cleanup(self) -> None:
         """Release robot and policy resources for a true UNLOAD."""

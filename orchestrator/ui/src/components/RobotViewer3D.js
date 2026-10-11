@@ -1,8 +1,8 @@
 import React, { useRef, useEffect, useMemo, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, Grid, Line } from '@react-three/drei';
+import { OrbitControls, Grid, Line, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { MdCenterFocusStrong } from 'react-icons/md';
+import { MdCenterFocusStrong, MdRefresh } from 'react-icons/md';
 import { useSelector } from 'react-redux';
 import useUrdfRobot from '../hooks/useUrdfRobot';
 import useJointStateSubscription from '../hooks/useJointStateSubscription';
@@ -25,6 +25,66 @@ const EMPTY_ROBOT_INFO = {
   actionTopicTypes: [],
   endEffectorLinks: [],
 };
+
+function buildEefPosePaths(data, relative) {
+  if (!data?.anchor_poses) return [];
+  const paths = ['observation', 'action'].flatMap((kind) => [0, 1].map((side) => {
+    const anchor = new THREE.Matrix4().set(...data.anchor_poses[side].flat());
+    const inverseAnchor = anchor.clone().invert();
+    const poses = (data[`${kind}_poses`] || []).map((row) => {
+      const pose = row.slice(side * 7, side * 7 + 6);
+      const axis = new THREE.Vector3(...pose.slice(3));
+      const angle = axis.length();
+      const rotation = new THREE.Quaternion();
+      if (angle > 1e-12) rotation.setFromAxisAngle(axis.divideScalar(angle), angle);
+      const transform = new THREE.Matrix4().compose(
+        new THREE.Vector3(...pose.slice(0, 3)), rotation, new THREE.Vector3(1, 1, 1)
+      );
+      if (relative) transform.premultiply(inverseAnchor);
+      const position = new THREE.Vector3().setFromMatrixPosition(transform);
+      return { position: position.toArray(), quaternion: new THREE.Quaternion().setFromRotationMatrix(transform).toArray() };
+    });
+    return { key: `${kind}-${side}`, side, label: `${side === 0 ? 'L' : 'R'} ${kind === 'observation' ? 'O' : 'A'}`, color: kind === 'observation' ? '#38bdf8' : '#fb923c', poses };
+  }));
+  if (relative) {
+    const offset = Math.max(0.025, ...paths.flatMap((path) => path.poses.map((pose) => Math.abs(pose.position[1]) + 0.012)));
+    paths.forEach((path) => path.poses.forEach((pose) => { pose.position[1] += path.side === 0 ? offset : -offset; }));
+  }
+  return paths;
+}
+
+function EefPoseOverlay({ paths, relative }) {
+  return (
+    <group rotation={[-Math.PI / 2, 0, 0]}>
+      {[0, 1].map((side) => {
+        const observation = paths.find((path) => path.key === `observation-${side}`)?.poses;
+        const action = paths.find((path) => path.key === `action-${side}`)?.poses;
+        return observation?.length && action?.length ? (
+          <Line key={`anchor-action-${side}`} points={[observation[observation.length - 1].position, action[0].position]} color="#fb923c" lineWidth={1} dashed dashSize={0.001} gapSize={0.001} />
+        ) : null;
+      })}
+      {paths.map(({ key, label, color, poses }) => (
+        <React.Fragment key={key}>
+          {poses.length > 1 && <Line points={poses.map((pose) => pose.position)} color={color} lineWidth={1.5} />}
+          {poses.map((pose, index) => (
+            <group key={index} position={pose.position} quaternion={pose.quaternion}>
+              <axesHelper args={[relative ? 0.002 : 0.006]} material-transparent material-opacity={0.35 + 0.65 * (index + 1) / poses.length} />
+              <mesh>
+                <sphereGeometry args={[0.0003, 8, 8]} />
+                <meshBasicMaterial color={color} transparent opacity={0.35 + 0.65 * (index + 1) / poses.length} />
+              </mesh>
+              {(index === 0 || index === poses.length - 1) && (
+                <Html style={{ pointerEvents: 'none', whiteSpace: 'nowrap', color, fontSize: 10, background: 'rgba(0,0,0,0.65)', borderRadius: 3, padding: '1px 3px', transform: `translate(${index === 0 ? '-100%' : '6px'}, ${key.startsWith('observation') ? '-22px' : '8px'})` }} zIndexRange={[5, 0]}>
+                  {label}{index}
+                </Html>
+              )}
+            </group>
+          ))}
+        </React.Fragment>
+      ))}
+    </group>
+  );
+}
 
 function RobotModel({ robot }) {
   const groupRef = useRef();
@@ -69,7 +129,7 @@ function TrajectoryPathLines({ paths }) {
             opacity={0.7}
           />
           <mesh position={path.points[path.points.length - 1]}>
-            <sphereGeometry args={[0.015, 12, 12]} />
+            <sphereGeometry args={[0.002, 12, 12]} />
             <meshStandardMaterial
               color={path.color}
               emissive={path.color}
@@ -82,7 +142,7 @@ function TrajectoryPathLines({ paths }) {
   );
 }
 
-const CameraController = forwardRef(function CameraController({ robot }, ref) {
+const CameraController = forwardRef(function CameraController({ robot, minModelDimension = MIN_USEFUL_MODEL_DIMENSION, minDistance = 0.3 }, ref) {
   const { camera } = useThree();
   const controlsRef = useRef();
   const centerRef = useRef(new THREE.Vector3());
@@ -107,14 +167,14 @@ const CameraController = forwardRef(function CameraController({ robot }, ref) {
       const size = box.getSize(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
 
-      if (maxDim < MIN_USEFUL_MODEL_DIMENSION && attempts < MAX_ATTEMPTS) {
+      if (maxDim < minModelDimension && attempts < MAX_ATTEMPTS) {
         if (attempts >= MAX_ATTEMPTS) clearInterval(poll);
         return;
       }
 
       // Check if size stabilized (< 1% change from previous)
       const changed = maxDim > 0 ? Math.abs(maxDim - prevMaxDim) / maxDim : 0;
-      if (changed < 0.01 && prevMaxDim >= MIN_USEFUL_MODEL_DIMENSION) {
+      if (changed < 0.01 && prevMaxDim >= minModelDimension) {
         stableCount++;
       } else {
         stableCount = 0;
@@ -127,7 +187,7 @@ const CameraController = forwardRef(function CameraController({ robot }, ref) {
         // Shift focus upward to robot body center (60% height instead of 50%)
         center.y = box.min.y + size.y * 0.6;
         centerRef.current.copy(center);
-        baseDist.current = Math.max(maxDim, MIN_USEFUL_MODEL_DIMENSION);
+        baseDist.current = Math.max(maxDim, minModelDimension);
         initialized.current = true;
         applyPreset('perspective', false);
         appliedOnce = true;
@@ -140,7 +200,7 @@ const CameraController = forwardRef(function CameraController({ robot }, ref) {
 
     return () => clearInterval(poll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [robot]);
+  }, [robot, minModelDimension]);
 
   const applyPreset = useCallback((presetName) => {
     if (!CAMERA_PRESETS[presetName]) return;
@@ -184,7 +244,7 @@ const CameraController = forwardRef(function CameraController({ robot }, ref) {
       makeDefault
       enableDamping
       dampingFactor={0.1}
-      minDistance={0.3}
+      minDistance={minDistance}
       maxDistance={10}
     />
   );
@@ -228,13 +288,26 @@ function FrameInvalidator({ fps, active = true }) {
   return null;
 }
 
-function SceneContent({ robot, trajectoryPaths, hasTrajectory, showGrid, cameraRef }) {
+function SceneContent({ robot, trajectoryPaths, hasTrajectory, showGrid, cameraRef, eefData, relativeEef }) {
+  const eefPaths = useMemo(() => buildEefPosePaths(eefData, relativeEef), [eefData, relativeEef]);
+  // Relative poses occupy two local TCP frames rather than the robot's world frame.
+  const extent = eefPaths.reduce((max, path) => path.poses.reduce(
+    (value, pose) => Math.max(value, ...pose.position.map(Math.abs)), max
+  ), 0);
+  // Quantize the bounds so small state updates do not reset the user's camera.
+  const focusSize = relativeEef ? Math.max(0.08, Math.ceil((extent * 2 + 0.012) / 0.02) * 0.02) : 0.08;
+  const relativeFocus = useMemo(() => new THREE.Mesh(new THREE.BoxGeometry(focusSize, focusSize, focusSize)), [focusSize]);
+  useEffect(() => () => {
+    relativeFocus.geometry.dispose();
+    relativeFocus.material.dispose();
+  }, [relativeFocus]);
   return (
     <>
       <SharedScene showGrid={showGrid} />
-      {robot && <RobotModel robot={robot} />}
+      {robot && !relativeEef && <RobotModel robot={robot} />}
       {hasTrajectory && <TrajectoryPathLines paths={trajectoryPaths} />}
-      <CameraController ref={cameraRef} robot={robot} />
+      {eefData && <EefPoseOverlay paths={eefPaths} relative={relativeEef} />}
+      <CameraController ref={cameraRef} robot={relativeEef ? relativeFocus : robot} minModelDimension={relativeEef ? 0.01 : MIN_USEFUL_MODEL_DIMENSION} minDistance={relativeEef ? 0.03 : 0.3} />
     </>
   );
 }
@@ -492,6 +565,8 @@ export default function RobotViewer3D({
   defaultVisualizationSource = 'state',
   urdfPathOverride = '',
   endEffectorLinksOverride = [],
+  controlledJointState = null,
+  eefData = null,
 }) {
   const globalRobotType = useSelector((state) => state.tasks.robotType);
   const robotType = robotTypeOverride || globalRobotType;
@@ -572,7 +647,9 @@ export default function RobotViewer3D({
   const [visualizationSource, setVisualizationSource] = useState(defaultVisualizationSource);
   const [trajectoryPaths, setTrajectoryPaths] = useState(null);
   const [hasTrajectory, setHasTrajectory] = useState(false);
+  const [relativeEef, setRelativeEef] = useState(false);
   const actionPreviewEnabled = showSourceSelector && visualizationSource === 'action';
+  const eefAnchorFrame = eefData?.frames?.[0]?.frame - (eefData?.action_poses?.length ? 1 : 0);
 
   useEffect(() => {
     if (showSourceSelector) {
@@ -583,6 +660,10 @@ export default function RobotViewer3D({
   const handleJointState = useCallback((data) => {
     setJointValues(data);
   }, [setJointValues]);
+
+  useEffect(() => {
+    if (robot && controlledJointState) setJointValues(controlledJointState);
+  }, [robot, controlledJointState, setJointValues]);
 
   const handleActionChunk = useCallback((data) => {
     if (!data?.names?.length || !data?.points?.length) return;
@@ -604,7 +685,7 @@ export default function RobotViewer3D({
   useJointStateSubscription(
     handleJointState,
     handleActionChunk,
-    mode === 'live' && !!robot,
+    mode === 'live' && !!robot && !eefData && !controlledJointState,
     {
       visualizationSource,
       liveUpdateHz,
@@ -650,6 +731,22 @@ export default function RobotViewer3D({
         value={visualizationSource}
         onChange={setVisualizationSource}
       />
+      {eefData && (
+        <div className="absolute bottom-2 left-2 z-10 rounded bg-black/70 p-2 text-xs text-white">
+          <label>
+            EEF pose frame{' '}
+            <select className="bg-gray-800" value={relativeEef ? 'relative' : 'robot'} onChange={(e) => setRelativeEef(e.target.value === 'relative')}>
+              <option value="robot">Robot</option>
+              <option value="relative">Relative TCP</option>
+            </select>
+          </label>
+          <div><span className="text-sky-400">O: Observation</span> / <span className="text-orange-400">A: Action</span> · L / R: arms</div>
+          {Number.isFinite(eefAnchorFrame) && <div>Observation anchor: frame {eefAnchorFrame} · Robot state: frame {eefData.frame}</div>}
+          <div>Dashed: observation anchor → first action target</div>
+          <div>Start → end: index / brightness ↑ · axes: X red, Y green, Z blue</div>
+          {relativeEef && <div>Observation TCP = origin · left/right origins separated for display</div>}
+        </div>
+      )}
       <Canvas
         camera={{ position: [1.5, 1.5, 1.5], fov: 50, near: 0.01, far: 100 }}
         dpr={[1, 1.5]}
@@ -682,9 +779,20 @@ export default function RobotViewer3D({
             hasTrajectory={hasTrajectory}
             showGrid={showGrid}
             cameraRef={cameraRef}
+            eefData={eefData}
+            relativeEef={relativeEef}
           />
         )}
       </Canvas>
+      <button
+        onClick={reload}
+        disabled={loading || !robotInfo.urdfPath}
+        className="absolute bottom-2 right-14 z-10 p-2.5 bg-black/50 text-white/80 rounded hover:bg-black/70 disabled:opacity-40 transition-colors"
+        title="Reload robot model"
+        aria-label="Reload robot model"
+      >
+        <MdRefresh size={22} />
+      </button>
       <button
         onClick={() => handlePreset(activePreset)}
         className="absolute bottom-2 right-2 z-10 p-2.5 bg-black/50 text-white/80 rounded hover:bg-black/70 transition-colors"

@@ -43,9 +43,9 @@ _CAMERA_SEMANTIC_RE = re.compile(
 class IoMappingMixin:
     """Robot wiring — camera / state modality resolution and teardown."""
 
-    def _init_robot(self, robot_type: str) -> None:
+    def _init_robot(self, robot_type: str, robot=None) -> None:
         """Create RobotClient + resolve camera / state mappings."""
-        self._robot = RobotClient(robot_type)
+        self._robot = robot if robot is not None else RobotClient(robot_type)
 
         # Cameras: only those that match a policy input key
         # ``observation.images.<cam>``. Cameras advertised by the robot
@@ -107,6 +107,7 @@ class IoMappingMixin:
         )
 
     def _teardown_robot(self) -> None:
+        self._dataset_simulation = None
         if getattr(self, "_relative_eef", None) is not None:
             self._relative_eef.close()
             self._relative_eef = None

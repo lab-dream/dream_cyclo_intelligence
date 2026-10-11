@@ -27,6 +27,9 @@ import numpy as np
 CMD_LOAD_POLICY = 0
 CMD_GET_ACTION = 1
 CMD_UNLOAD_POLICY = 2
+CMD_LOAD_DATASET_SIMULATION = 3
+CMD_STEP_DATASET_SIMULATION = 4
+CMD_UNLOAD_DATASET_SIMULATION = 5
 
 
 ENGINE_COMMAND_REQUEST_DEF = """\
@@ -39,6 +42,7 @@ string task_instruction
 string acceleration_mode
 string acceleration_engine_path
 float64 inference_hz
+string simulation_config
 """
 
 ENGINE_COMMAND_RESPONSE_DEF = """\
@@ -49,6 +53,7 @@ string[] action_keys
 int32 chunk_size
 int32 action_dim
 float64[] action_list
+string simulation_state
 """
 
 
@@ -63,6 +68,7 @@ class EngineCommandRequest:
     acceleration_mode: str = ""
     acceleration_engine_path: str = ""
     inference_hz: float = 0.0
+    simulation_config: str = ""
 
 
 @dataclass
@@ -74,6 +80,7 @@ class EngineCommandResponse:
     chunk_size: int = 0
     action_dim: int = 0
     action_list: List[float] = field(default_factory=list)
+    simulation_state: str = ""
 
 
 def request_from_message(message: Any) -> EngineCommandRequest:
@@ -90,6 +97,7 @@ def request_from_message(message: Any) -> EngineCommandRequest:
             getattr(message, "acceleration_engine_path", "") or ""
         ),
         inference_hz=float(getattr(message, "inference_hz", 0) or 0),
+        simulation_config=str(getattr(message, "simulation_config", "") or ""),
     )
 
 
@@ -105,6 +113,7 @@ def response_from_message(message: Any) -> EngineCommandResponse:
         chunk_size=int(getattr(message, "chunk_size", 0)),
         action_dim=int(getattr(message, "action_dim", 0)),
         action_list=[float(v) for v in list(action_list)] if action_list is not None else [],
+        simulation_state=str(getattr(message, "simulation_state", "") or ""),
     )
 
 
@@ -118,6 +127,7 @@ def response_to_message_kwargs(response: EngineCommandResponse) -> dict:
         "chunk_size": int(response.chunk_size),
         "action_dim": int(response.action_dim),
         "action_list": np.asarray(response.action_list, dtype=np.float64),
+        "simulation_state": str(response.simulation_state),
     }
 
 
@@ -133,6 +143,7 @@ def request_to_message_kwargs(request: EngineCommandRequest) -> dict:
         "acceleration_mode": str(request.acceleration_mode),
         "acceleration_engine_path": str(request.acceleration_engine_path),
         "inference_hz": float(request.inference_hz),
+        "simulation_config": str(request.simulation_config),
     }
 
 

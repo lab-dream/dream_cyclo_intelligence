@@ -878,7 +878,7 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <box size="0.01 0.01 0.01"/>
+        <box size="0.001 0.001 0.001"/>
       </geometry>
       <material name="red">
         <color rgba="1.0 0.0 0.0 1"/>
@@ -1053,7 +1053,7 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <box size="0.01 0.01 0.01"/>
+        <box size="0.0006 0.0006 0.0006"/>
       </geometry>
       <material name="red">
         <color rgba="1.0 0.0 0.0 1"/>
