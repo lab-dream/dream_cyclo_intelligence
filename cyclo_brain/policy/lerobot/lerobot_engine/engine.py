@@ -55,6 +55,7 @@ import math
 import os
 import sys
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 import numpy as np
 
@@ -65,6 +66,15 @@ import numpy as np
 _ROBOT_CLIENT_PATH = os.environ.get("ROBOT_CLIENT_SDK_PATH", "/robot_client_sdk")
 if os.path.exists(_ROBOT_CLIENT_PATH) and _ROBOT_CLIENT_PATH not in sys.path:
     sys.path.insert(0, _ROBOT_CLIENT_PATH)
+
+_parents = Path(__file__).resolve().parents
+_ACTION_CHUNK_PATH = os.environ.get(
+    "ACTION_CHUNK_PROCESSING_SDK_PATH",
+    str(_parents[3] / "sdk" / "action_chunk_processing") if len(_parents) > 3
+    else "/action_chunk_processing_sdk",
+)
+if os.path.exists(_ACTION_CHUNK_PATH) and _ACTION_CHUNK_PATH not in sys.path:
+    sys.path.insert(0, _ACTION_CHUNK_PATH)
 
 
 # Import order: engine ABC first (validates /policy_runtime is on PYTHONPATH),
@@ -187,7 +197,7 @@ class LeRobotEngine(
                 self._init_robot(robot_type, dataset_robot)
             self._loaded_robot_type = robot_type
             self._image_resize = self._infer_image_resize(self._policy)
-            self._configure_relative_eef(model_path, robot_type)
+            self._configure_relative_eef(model_path, robot_type, request)
             self._dataset_simulation = dataset_robot
 
             return {
@@ -196,7 +206,7 @@ class LeRobotEngine(
                     "LeRobot inference restarted (policy cached)"
                     if cache_hit
                     else f"loaded {model_path}"
-                ) + (" (relative EEF → IK)" if self._relative_eef is not None else ""),
+                ) + (f" (relative EEF → {self._relative_eef.ik_backend})" if self._relative_eef is not None else ""),
                 "action_keys": list(self._action_keys),
             }
         except Exception as e:

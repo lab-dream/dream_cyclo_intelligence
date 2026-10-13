@@ -98,6 +98,14 @@ class InferenceModeTests(unittest.TestCase):
             ),
         )
 
+    def test_runtime_signature_reloads_when_ik_backend_or_model_changes(self) -> None:
+        args = ("/models/policy", "pytorch", "", "async", 100, 15, 0.3)
+        native = inference_runtime_signature(*args)
+        nodeik = inference_runtime_signature(*args, ik_backend="nodeik", ik_model_path="/models/pose")
+        self.assertNotEqual(native, nodeik)
+        self.assertNotEqual(nodeik, inference_runtime_signature(*args, ik_backend="nodeik", ik_model_path="/models/vision"))
+        self.assertEqual(native, inference_runtime_signature(*args, ik_model_path="/unused/model"))
+
     def test_runtime_signature_changes_with_initial_pose_sync(self) -> None:
         base = inference_runtime_signature(
             "/models/policy", "pytorch", "", "async", 100, 15, 0.3,

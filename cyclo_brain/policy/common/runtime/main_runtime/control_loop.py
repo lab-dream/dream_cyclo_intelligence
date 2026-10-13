@@ -141,6 +141,7 @@ class ControlLoop:
         chunk_align_window_s: Optional[float] = None,
         initial_pose_sync: bool = False,
         initial_pose_sync_duration_s: float = 5.0,
+        ik_backend: str = "cyclo_control",
     ) -> None:
         duration_s = float(initial_pose_sync_duration_s)
         if not math.isfinite(duration_s) or not 1.0 <= duration_s <= 60.0:
@@ -175,6 +176,7 @@ class ControlLoop:
                 postprocess=self._postprocess_actions,
                 target_chunk_size=self._target_chunk_size,
                 alignment_mode=self._alignment_mode,
+                interpolation_method="quintic" if ik_backend == "nodeik" else "linear",
             )
             self._task_instruction = task_instruction or ""
             self._action_keys = list(action_keys or self._robot.action_keys)

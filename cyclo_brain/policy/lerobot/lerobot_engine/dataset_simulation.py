@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import cv2
 import numpy as np
 import torch
+from action_chunk_processing.spline import quintic_spline_multi
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robot_client import RobotClient
 from robot_client.robot_client import derive_robot_config, robot_schema
@@ -23,7 +24,7 @@ from .image_preprocessing import apply_rotation
 class DatasetSimulation(RobotClient):
     """Reuse RobotClient's named groups without creating any robot transport."""
 
-    def __init__(self, robot_type, dataset_path, episode, frame, n_obs_steps):
+    def __init__(self, robot_type, dataset_path, episode, frame, n_obs_steps, control_hz=100):
         self._closed = True  # RobotClient's destructor must not close nonexistent transport.
         self.dataset_root = Path(dataset_path)
         info = json.loads((self.dataset_root / "meta/info.json").read_text())
@@ -36,6 +37,9 @@ class DatasetSimulation(RobotClient):
         self._action_groups = robot_schema.get_action_groups(section)
         self.names = info["features"]["observation.state"]["names"]
         self.fps = info["fps"]
+        self.control_hz = float(control_hz)
+        if not np.isfinite(self.control_hz) or self.control_hz <= 0:
+            raise ValueError("control_hz must be positive and finite.")
         self.dataset = LeRobotDataset(self.dataset_root.name, root=self.dataset_root,
                                      episodes=[episode], video_backend="pyav")
         self.length = len(self.dataset)
@@ -120,10 +124,26 @@ class DatasetSimulation(RobotClient):
             state = self.history[-1][1].copy()
             for name, value in zip(names, values, strict=True):
                 state[self.names.index(name)] = value
+            if engine._relative_eef.ik_backend == "nodeik":
+                # Only endpoint states enter policy history; images follow dataset time.
+                duration = 1.0 / self.fps
+                times = np.append(np.arange(1.0 / self.control_hz, duration,
+                                            1.0 / self.control_hz), duration)
+                previous_t = 0.0
+                zero = np.zeros_like(state)
+                for t in times:
+                    intermediate = quintic_spline_multi(
+                        t, 0.0, duration, self.history[-1][1], zero, zero,
+                        state, zero, zero)[0]
+                    endpoint = t == duration
+                    self.current = (self.frame + int(endpoint), state if endpoint else intermediate)
+                    frames.append({**self.frame_state(engine), "dt_s": float(t - previous_t)})
+                    previous_t = t
             self.frame += 1
             self.history.append((self.frame, state))
             self.current = self.history[-1]
-            frames.append(self.frame_state(engine))
+            if engine._relative_eef.ik_backend != "nodeik":
+                frames.append(self.frame_state(engine))
         # Keep only the current history's images, not a whole decoded episode.
         keep = {frame for frame, _ in self.history}
         self._samples = {frame: sample for frame, sample in self._samples.items() if frame in keep}
@@ -146,7 +166,7 @@ def dataset_simulation_command(engine, request):
         settings = json.loads(request.simulation_config)
         robot = DatasetSimulation(request.robot_type, settings["dataset_path"],
                                   int(settings.get("episode", 0)), int(settings.get("frame", 0)),
-                                  config["n_obs_steps"])
+                                  config["n_obs_steps"], settings.get("control_hz", 100))
         loaded = engine.load_policy(SimpleNamespace(**vars(request), dataset_robot=robot))
         if not loaded["success"]:
             robot.close()
@@ -183,7 +203,7 @@ def dataset_simulation_command(engine, request):
     relative_action = robot.relative_action if request.command == 4 else None
     return {
         "episode": robot.episode, "frame": robot.frame, "length": robot.length,
-        "fps": robot.fps,
+        "fps": robot.fps, "ik_backend": adapter.ik_backend,
         "finished": robot.frame >= robot.length - 1, "frames": frames,
         "observation_relative": robot.relative_observation.tolist(),
         "action_relative": relative_action.tolist() if relative_action is not None else [],

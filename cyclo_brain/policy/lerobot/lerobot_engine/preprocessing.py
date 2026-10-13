@@ -62,6 +62,10 @@ class PreprocessingMixin:
         if not images:
             return self._fail("No camera frames available")
 
+        adapter = getattr(self, "_relative_eef", None)
+        if adapter is not None and adapter.ik_backend == "nodeik":
+            adapter.kinematics.set_images(images, self._robot._config.get("cameras", {}))
+
         joint_dict = self._robot.get_joint_positions()
         if not joint_dict:
             return self._fail("No joint positions available")

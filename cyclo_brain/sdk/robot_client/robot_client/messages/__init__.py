@@ -70,6 +70,8 @@ uint16 inference_hz
 float64 chunk_align_window_s
 bool initial_pose_sync
 float64 initial_pose_sync_duration_s
+string ik_backend
+string ik_model_path
 """
 
 INFERENCE_COMMAND_RESPONSE_DEF = """\
@@ -90,6 +92,10 @@ string robot_type
 string task_instruction
 string acceleration_mode
 string acceleration_engine_path
+float64 inference_hz
+string simulation_config
+string ik_backend
+string ik_model_path
 """
 
 ENGINE_COMMAND_RESPONSE_DEF = """\
@@ -100,6 +106,7 @@ string[] action_keys
 int32 chunk_size
 int32 action_dim
 float64[] action_list
+string simulation_state
 """
 
 # --- StopTraining (interfaces/srv/StopTraining.srv) ---

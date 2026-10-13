@@ -35,6 +35,7 @@ def simulation(tmp_path):
         robot = DatasetSimulation("ffw_sg2_rev1", tmp_path, 1, 1, 2)
     reader.assert_called_once_with(tmp_path.name, root=tmp_path, episodes=[1], video_backend="pyav")
     adapter = RelativeEEFAdapter.__new__(RelativeEEFAdapter)
+    adapter.ik_backend = "cyclo_control"
     adapter.robot = robot
     adapter.names = names
     adapter.transform = RelativeEEFTransform(features, stats)
@@ -88,6 +89,51 @@ def test_episode_end_does_not_read_or_apply_past_final_frame(simulation):
     frames = robot.advance(np.zeros((8, 17)), engine)
     assert [frame["frame"] for frame in frames] == [2, 3, 4, 5]
     assert robot.frame == 5
+    assert not robot.advance(np.zeros((8, 17)), engine)
+
+
+def test_nodeik_quintic_subframes_preserve_endpoint_feedback_and_dataset_images(simulation):
+    robot, engine, samples = simulation
+    engine._relative_eef.ik_backend = "nodeik"
+    engine._relative_eef.kinematics = SimpleNamespace(set_images=lambda *args: None)
+    commands = np.full((2, 17), 0.25)
+    commands[1] = 0.5
+    initial = robot.current[1].copy()
+    frames = robot.advance(commands, engine)
+    assert len(frames) == 8  # 10, 20, 30, 33.333 ms per 30 Hz waypoint
+    assert [frame["frame"] for frame in frames] == [1, 1, 1, 2, 2, 2, 2, 3]
+    assert sum(frame["dt_s"] for frame in frames) == pytest.approx(2 / 30)
+    state = np.array([frame["joint_state"]["position"] for frame in frames])
+    # Independent known smoothstep value at 30% of the first interval.
+    weight = 10 * 0.3**3 - 15 * 0.3**4 + 6 * 0.3**5
+    expected = initial[:16] + weight * (commands[0, :16] - initial[:16])
+    np.testing.assert_allclose(state[0, :16], expected, atol=1e-7)
+    np.testing.assert_allclose(state[3, :16], commands[0, :16])
+    np.testing.assert_allclose(state[7, :16], commands[1, :16])
+    lift = robot.names.index("lift_joint")
+    np.testing.assert_allclose(state[[3, 7], lift], commands[:, 16])
+    assert [frame for frame, _ in robot.history] == [2, 3]
+    np.testing.assert_allclose(robot.current[1], state[-1])
+    assert frames[0]["images"] == frames[1]["images"] == frames[2]["images"]
+    assert frames[2]["images"] != frames[3]["images"]
+    assert set(robot._samples) == {2, 3}
+    # Next policy window uses endpoint states, never interpolation subframes.
+    batch = engine._build_policy_observation("task")
+    endpoints = np.stack([state[3], state[7]])
+    expected = engine._relative_eef.transform({"observation.state": endpoints,
+                                              "action": endpoints})["observation.state"]
+    torch.testing.assert_close(batch["observation.state"][0], expected)
+    key = next(iter(engine._cameras.values()))
+    torch.testing.assert_close(batch[key][0, :, 0, 0, 0], torch.tensor([0.2, 0.3]), atol=1/255, rtol=0)
+
+
+def test_nodeik_subframes_stop_at_episode_end(simulation):
+    robot, engine, _ = simulation
+    engine._relative_eef.ik_backend = "nodeik"
+    frames = robot.advance(np.zeros((8, 17)), engine)
+    assert len(frames) == 16
+    assert robot.frame == 5
+    assert frames[-1]["frame"] == 5
     assert not robot.advance(np.zeros((8, 17)), engine)
 
 

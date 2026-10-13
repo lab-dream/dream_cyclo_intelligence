@@ -24,6 +24,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+from .spline import quintic_spline, quintic_spline_multi
+
 
 class ActionChunkProcessor:
 
@@ -37,6 +39,7 @@ class ActionChunkProcessor:
         postprocess: bool = True,
         target_chunk_size: Optional[int] = None,
         alignment_mode: str = "l2",
+        interpolation_method: str = "linear",
     ):
         self._inference_hz = float(inference_hz)
         self._control_hz = float(control_hz)
@@ -49,6 +52,9 @@ class ActionChunkProcessor:
         self._postprocess = bool(postprocess)
         self._target_chunk_size = target_chunk_size
         self._alignment_mode = str(alignment_mode).lower()
+        self._interpolation_method = str(interpolation_method).lower()
+        if self._interpolation_method not in {"linear", "quintic"}:
+            raise ValueError("interpolation_method must be 'linear' or 'quintic'")
         if self._target_chunk_size is not None and self._target_chunk_size <= 0:
             raise ValueError("target_chunk_size must be positive")
         if self._alignment_mode not in {"l2", "none", "rtc"}:
@@ -202,10 +208,7 @@ class ActionChunkProcessor:
                 return np.repeat(chunk, target, axis=0)
             t_original = np.linspace(0.0, 1.0, T)
             t_interp = np.linspace(0.0, 1.0, target)
-            out = np.empty((target, D))
-            for d in range(D):
-                out[:, d] = np.interp(t_interp, t_original, chunk[:, d])
-            return out
+            return self._resample(chunk, t_original, t_interp)
         if T < 2:
             return chunk
         t_original = np.arange(T) / self._inference_hz
@@ -215,7 +218,21 @@ class ActionChunkProcessor:
         # 16-point, 15 Hz source trajectory becomes 100 outputs at 100 Hz.
         n_interp = max(1, int(round(duration * self._control_hz)))
         t_interp = np.arange(n_interp) / self._control_hz
-        out = np.empty((n_interp, D))
+        return self._resample(chunk, t_original, t_interp)
+
+    def _resample(self, chunk, t_original, t_interp) -> np.ndarray:
+        if self._interpolation_method == "quintic":
+            zero = np.zeros(chunk.shape[1])
+            out = []
+            for t in t_interp:
+                segment = np.clip(np.searchsorted(t_original, t, side="right") - 1,
+                                  0, len(chunk) - 2)
+                out.append(quintic_spline_multi(
+                    t, t_original[segment], t_original[segment + 1],
+                    chunk[segment], zero, zero, chunk[segment + 1], zero, zero)[0])
+            return np.asarray(out)
+        D = chunk.shape[1]
+        out = np.empty((len(t_interp), D))
         for d in range(D):
             out[:, d] = np.interp(t_interp, t_original, chunk[:, d])
         return out
@@ -227,6 +244,9 @@ class ActionChunkProcessor:
         n_blend = min(self._blend_steps, len(chunk))
         for i in range(n_blend):
             alpha = (i + 1) / (n_blend + 1)
+            if self._interpolation_method == "quintic":
+                alpha = quintic_spline(alpha, 0.0, 1.0, 0.0, 0.0, 0.0,
+                                       1.0, 0.0, 0.0)[0]
             chunk[i] = (1 - alpha) * anchor + alpha * chunk[i]
         return chunk
 

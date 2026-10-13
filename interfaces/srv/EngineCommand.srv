@@ -27,6 +27,10 @@ string acceleration_engine_path
 float64 inference_hz
 # Dataset simulation only: JSON with dataset_path, episode, and initial frame.
 string simulation_config
+
+# Relative EEF IK: empty/cyclo_control keeps the current solver; nodeik loads a .pt model.
+string ik_backend
+string ik_model_path
 ---
 uint64 seq_id
 bool success

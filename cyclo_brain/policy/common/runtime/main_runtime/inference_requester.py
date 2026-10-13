@@ -58,6 +58,8 @@ class InferenceRequester:
                 getattr(request, "acceleration_engine_path", "") or ""
             ),
             inference_hz=float(getattr(request, "inference_hz", 0) or 0),
+            ik_backend=str(getattr(request, "ik_backend", "") or ""),
+            ik_model_path=str(getattr(request, "ik_model_path", "") or ""),
         )
         return self._call(
             engine_request,

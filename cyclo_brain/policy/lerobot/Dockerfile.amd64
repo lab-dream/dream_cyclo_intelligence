@@ -102,6 +102,10 @@ COPY --from=cyclo_sdk cyclo_ik /opt/cyclo_sdk/cyclo_ik
 RUN uv pip install pybind11==2.13.6 cmeel-eigen==3.4.1 cmeel-urdfdom-headers==1.1.2 \
     && bash /opt/cyclo_sdk/cyclo_ik/build.sh /opt/cyclo_ik
 
+# Reuse the pinned NodeIK worker without its optional training dependencies.
+COPY --from=cyclo_sdk nodeik /opt/cyclo_sdk/nodeik
+RUN uv pip install --no-deps /opt/cyclo_sdk/nodeik torchdiffeq==0.2.5
+
 # Zenoh + runtime Python deps. zenoh_ros2_sdk / robot_client /
 # action_chunk_processing come in via bind-mount (see docker-compose.yml).
 # IMPORTANT: eclipse-zenoh version MUST match rmw_zenoh_cpp's bundled

@@ -87,6 +87,70 @@ The engine and copied helpers are bind-mounted. Both source Dockerfiles install
 SciPy and build the native Cyclo binding against their Pinocchio installation.
 The SDK build context is supplied by Compose's `additional_contexts` entry.
 
+### Select Cyclo Control or NodeIK
+
+In **Inference**, choose LeRobot / Diffusion and use **EEF IK** to select
+**Cyclo Control** (default) or **NodeIK**. This applies to relative EEF policies
+in both normal inference and dataset feedback simulation. Joint-action policies
+keep their existing path. Unload dataset simulation before changing the solver;
+normal inference reloads when the IK backend or model changes.
+
+NodeIK is an unchanged Git submodule at `cyclo_brain/sdk/nodeik`, pinned to
+`5273c0503bd2176f8a42c50e6e50f83f5103d53f`. The small `lerobot_engine/nodeik.py`
+bridge calls its official `load_model`, `encode_poses`, and `predict` functions.
+It reuses the Dream FK/math files already vendored for relative EEF policies,
+so a separate Dream LeRobot installation is unnecessary.
+
+```bash
+git submodule update --init cyclo_brain/sdk/nodeik
+docker compose -f docker/docker-compose.yml build lerobot
+```
+
+For an existing container with the submodule mounted at `/opt/cyclo_sdk/nodeik`,
+install only `torchdiffeq==0.2.5` in the policy Python environment and restart
+the LeRobot runtime. The source Dockerfiles install NodeIK and this dependency;
+Compose also mounts the submodule for local development. Rebuild `interfaces`
+and restart the orchestrator, ROS bridge, and policy runtime after updating
+the service definitions (`ik_backend`, `ik_model_path`), then rebuild the UI.
+
+**NodeIK Model** accepts a folder or `.pt` file and has the same folder browser
+as Policy Path. A compare-run folder resolves to `pose/best.pt`; selecting
+`pose/`, `vision/`, or an explicit checkpoint loads that model. The tested
+local weights were copied to the container-visible folder:
+
+```text
+/workspace/model/nodeik/nodeik_20261010_e2e30k
+```
+
+The pose checkpoint is step 76000; the run name predates its resumed training.
+The vision checkpoint requires all four recorded head/wrist RGB cameras.
+Missing cameras fail explicitly. UMI first restores absolute left/right TCP
+poses in the fixed URDF base frame; NodeIK returns left 7 / right 7 / lift in
+radians/meters. One fixed latent (`0`) is retained across the trajectory. Joint
+outputs are clipped to the training URDF limits, then combined with the existing
+policy gripper outputs. FK residuals are measured after clipping. NodeIK is an
+approximate learned solver and does not receive Cyclo QP refinement.
+
+When **NodeIK** is selected, the normal control loop uses quintic joint-space
+interpolation instead of linear interpolation, at the existing **Control Hz**.
+It interpolates both arms, lift, and policy grippers after IK, and uses a
+quintic weight for the existing chunk blend. The uploaded `quintic_spline` and
+`quintic_spline_multi` functions (Suhan Park) are copied unchanged into
+`cyclo_brain/sdk/action_chunk_processing/action_chunk_processing/spline.py`;
+the NodeIK submodule is unchanged. Normal interpolation requires the existing
+`POSTPROCESS_ACTIONS=true` setting (default).
+
+Each interval has zero endpoint velocity and acceleration, giving a bounded,
+rest-to-rest quintic curve without overshooting its joint endpoints. This does
+not impose joint velocity/acceleration limits or a straight TCP path. Dataset
+feedback simulation also displays these intermediate states from the current
+state to each IK target. Only target endpoints enter the next observation
+history, and images advance at dataset frame boundaries. Playback samples each
+interval at Control Hz and also includes its exact endpoint. At 30 dataset FPS and
+100 Control Hz, eight IK targets produce 32 displayed states over 8/30 seconds,
+while the dataset frame still advances by eight. Cyclo Control keeps its
+existing interpolation and dataset playback behavior.
+
 ### Dataset feedback simulation in Inference
 
 Keep the existing Policy Path, select **Simulation** and the LeRobot backend,
@@ -112,7 +176,7 @@ LeRobot runtime so both ends use the updated service definition.
 
 The first observation window comes from the selected episode, ending at the
 initial frame; frames before episode start are padded with its first sample.
-Afterward, the existing UMI decoder and Cyclo shared arm/lift IK produce joint
+Afterward, the existing UMI decoder and the selected EEF IK backend produce joint
 commands. Each command replaces the simulated arms, grippers, and lift state;
 the last `n_obs_steps` simulated states feed the next prediction. Head and base
 retain their initial values. Camera images advance one recorded dataset frame

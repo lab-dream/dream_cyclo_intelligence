@@ -59,6 +59,10 @@ COPY --from=cyclo_sdk cyclo_ik /opt/cyclo_sdk/cyclo_ik
 RUN pip install --no-cache-dir pybind11==2.13.6 cmeel-eigen==3.4.1 cmeel-urdfdom-headers==1.1.2 \
     && bash /opt/cyclo_sdk/cyclo_ik/build.sh /opt/cyclo_ik
 
+# Reuse the pinned NodeIK worker without its optional training dependencies.
+COPY --from=cyclo_sdk nodeik /opt/cyclo_sdk/nodeik
+RUN uv pip install --no-deps /opt/cyclo_sdk/nodeik torchdiffeq==0.2.5
+
 # Zenoh + runtime deps. SDKs are bind-mounted (see docker-compose.yml).
 RUN pip install --no-cache-dir "eclipse-zenoh>=1.6.0,<1.7.0" "rosbags>=0.11.0" "GitPython>=3.1.18" "json5>=0.9.14" pyyaml scipy \
     && mkdir -p /zenoh_sdk /robot_client_sdk /action_chunk_processing_sdk /orchestrator_config \

@@ -10,3 +10,6 @@
 [submodule "cyclo_brain/sdk/cyclo_control"]
 	path = cyclo_brain/sdk/cyclo_control
 	url = https://github.com/ROBOTIS-GIT/cyclo_control.git
+[submodule "cyclo_brain/sdk/nodeik"]
+	path = cyclo_brain/sdk/nodeik
+	url = https://github.com/lab-dream/nodeik.git

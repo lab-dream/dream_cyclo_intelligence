@@ -66,6 +66,7 @@ const InferencePanel = () => {
   const [isTaskStatusPaused, setIsTaskStatusPaused] = useState(false);
   const [lastTaskStatusUpdate, setLastTaskStatusUpdate] = useState(Date.now());
   const [showPolicyBrowser, setShowPolicyBrowser] = useState(false);
+  const [showIkBrowser, setShowIkBrowser] = useState(false);
 
   // InferencePage's lock — only the inference-side phase matters here.
   // Record phase is the InfoPanel's concern (D18, plan record-zippy-sunrise).
@@ -563,6 +564,40 @@ const InferencePanel = () => {
         </div>
       )}
 
+      {info.serviceType === 'lerobot' && info.policyType === 'diffusion' && (
+        <>
+          <div className="flex items-center mb-2.5">
+            <label htmlFor="eef-ik-backend" className={classLabel}>EEF IK</label>
+            <select id="eef-ik-backend" aria-label="EEF IK backend" className={classTextInput}
+              value={info.ikBackend || 'cyclo_control'} disabled={!isEditable}
+              onChange={(e) => handleChange('ikBackend', e.target.value)}>
+              <option value="cyclo_control">Cyclo Control</option>
+              <option value="nodeik">NodeIK</option>
+            </select>
+          </div>
+          {info.ikBackend === 'nodeik' && (
+            <div className="flex items-start mb-2.5">
+              <label htmlFor="nodeik-model-path" className={clsx(classLabel, 'pt-2')}>NodeIK Model</label>
+              <div className="flex flex-1 min-w-0 gap-2">
+                <textarea id="nodeik-model-path" aria-label="NodeIK model path"
+                  className={classPolicyPathTextarea} value={info.ikModelPath || ''}
+                  onChange={(e) => handleChange('ikModelPath', e.target.value)} disabled={!isEditable}
+                  placeholder="Model folder or best.pt" />
+                <button type="button" onClick={() => setShowIkBrowser(true)} disabled={!isEditable}
+                  className="flex items-center justify-center w-9 h-9 text-blue-500 bg-gray-200 rounded-md disabled:opacity-50 shrink-0"
+                  aria-label="Browse for NodeIK model folder">
+                  <MdFolderOpen className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="mb-2.5 text-xs text-gray-500">
+            Relative EEF policies use the selected IK in simulation and robot mode.
+            {info.ikBackend === 'nodeik' && ' Select a run folder for pose/best.pt, or its vision folder for camera-conditioned IK.'}
+          </div>
+        </>
+      )}
+
       {isGrootModel && (
         <>
           <div className={clsx('flex', 'items-center', 'mb-2.5')}>
@@ -760,6 +795,19 @@ const InferencePanel = () => {
         initialPath={policyBrowserPath}
         defaultPath={policyBrowserPath}
         homePath={DEFAULT_PATHS.POLICY_CHECKPOINTS_PATH}
+      />
+      <FileBrowserModal
+        isOpen={showIkBrowser}
+        onClose={() => setShowIkBrowser(false)}
+        onFileSelect={(item) => { handleChange('ikModelPath', item.full_path); setShowIkBrowser(false); }}
+        title="Select NodeIK model folder"
+        selectButtonText="Select"
+        allowDirectorySelect={true}
+        allowFileSelect={true}
+        fileFilter={(item) => item.name.endsWith('.pt')}
+        initialPath={info.ikModelPath?.endsWith('.pt') ? info.ikModelPath.slice(0, info.ikModelPath.lastIndexOf('/')) : (info.ikModelPath || '/workspace/model/nodeik')}
+        defaultPath="/workspace/model/nodeik"
+        homePath="/workspace/model"
       />
     </div>
   );

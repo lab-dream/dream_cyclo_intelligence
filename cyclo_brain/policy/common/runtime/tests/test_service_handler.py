@@ -146,12 +146,14 @@ class ServiceHandlerPublishModeTests(unittest.TestCase):
             control_hz=80,
             inference_hz=20,
             chunk_align_window_s=0.25,
+            ik_backend="nodeik",
         ))
 
         self.assertTrue(response.success)
         self.assertEqual(loop.configures[0]["control_hz"], 80)
         self.assertEqual(loop.configures[0]["inference_hz"], 20)
         self.assertEqual(loop.configures[0]["chunk_align_window_s"], 0.25)
+        self.assertEqual(loop.configures[0]["ik_backend"], "nodeik")
 
     def test_load_uses_zero_timing_for_legacy_request(self) -> None:
         handler, _session, loop = self._handler()

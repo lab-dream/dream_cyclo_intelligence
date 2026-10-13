@@ -44,3 +44,7 @@ string acceleration_engine_path
 # action of the first chunk as a slow initial pose target before normal control.
 bool initial_pose_sync
 float64 initial_pose_sync_duration_s
+
+# Relative EEF IK: empty/cyclo_control keeps the current solver; nodeik loads a .pt model.
+string ik_backend
+string ik_model_path

@@ -125,7 +125,7 @@ class LoadingMixin:
         logger.info("Pre/post processors loaded")
         return policy, preprocessor, postprocessor
 
-    def _configure_relative_eef(self, model_path: str, robot_type: str) -> None:
+    def _configure_relative_eef(self, model_path: str, robot_type: str, request=None) -> None:
         """Select the inference representation from the saved checkpoint, never its width."""
         config_path = Path(model_path) / "config.json"
         if not config_path.is_file():
@@ -144,7 +144,11 @@ class LoadingMixin:
                 raise ValueError(f"Relative EEF checkpoint requires a 20-dimensional {key}.")
         from .relative_eef import RelativeEEFAdapter
 
-        self._relative_eef = RelativeEEFAdapter(model_path, self._robot, robot_type)
+        self._relative_eef = RelativeEEFAdapter(
+            model_path, self._robot, robot_type,
+            ik_backend=getattr(request, "ik_backend", "") or "cyclo_control",
+            ik_model_path=getattr(request, "ik_model_path", ""), device=str(getattr(self, "_device", None) or "cpu"),
+        )
         self._action_keys = list(self._relative_eef.action_keys)
 
     def _infer_image_resize(self, policy: PreTrainedPolicy) -> Dict[str, Tuple[int, int]]:

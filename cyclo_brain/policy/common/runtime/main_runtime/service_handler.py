@@ -70,6 +70,7 @@ class ServiceHandler:
             control_hz=getattr(request, "control_hz", 0),
             inference_hz=getattr(request, "inference_hz", 0),
             chunk_align_window_s=getattr(request, "chunk_align_window_s", 0.0),
+            ik_backend=getattr(request, "ik_backend", "cyclo_control"),
             initial_pose_sync=bool(getattr(request, "initial_pose_sync", False)),
             initial_pose_sync_duration_s=(
                 float(getattr(request, "initial_pose_sync_duration_s", 0.0)) or 5.0

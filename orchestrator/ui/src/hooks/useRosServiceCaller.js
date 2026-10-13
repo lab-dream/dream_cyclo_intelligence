@@ -404,6 +404,8 @@ export function useRosServiceCaller() {
             action_request_mode: actionRequestMode,
             acceleration_mode: accelerationMode || 'pytorch',
             acceleration_engine_path: accelerationEnginePath,
+            ik_backend: taskInfo.serviceType === 'lerobot' ? (taskInfo.ikBackend || 'cyclo_control') : 'cyclo_control',
+            ik_model_path: taskInfo.serviceType === 'lerobot' ? String(taskInfo.ikModelPath || '').trim() : '',
             ...buildInitialPoseSyncTaskInfo(taskInfo),
           },
           command: Number(command_enum),

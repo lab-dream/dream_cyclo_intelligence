@@ -78,6 +78,18 @@ describe('InferencePanel initial pose sync settings', () => {
     jest.clearAllMocks();
   });
 
+  test('selects NodeIK and syncs its model path with the inference task', async () => {
+    jest.useFakeTimers();
+    const { store, sendRecordCommand } = renderPanel({ inferenceMode: 'simulation', policyType: 'diffusion' });
+    expect(screen.getByLabelText('EEF IK backend')).toHaveValue('cyclo_control');
+    fireEvent.change(screen.getByLabelText('EEF IK backend'), { target: { value: 'nodeik' } });
+    fireEvent.change(screen.getByLabelText('NodeIK model path'), { target: { value: '/models/nodeik/pose' } });
+    expect(store.getState().tasks.inferenceTaskInfo).toMatchObject({ ikBackend: 'nodeik', ikModelPath: '/models/nodeik/pose' });
+    await act(async () => { jest.runOnlyPendingTimers(); });
+    expect(sendRecordCommand).toHaveBeenCalledWith('set_task_info', { autofillEmptyTaskFields: false });
+    jest.useRealTimers();
+  });
+
   test('applies the local diffusion checkpoint and syncs its dataset FPS', async () => {
     jest.useFakeTimers();
     const { store, sendRecordCommand } = renderPanel({

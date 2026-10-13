@@ -28,7 +28,12 @@ class RelativeEEFAdapter:
 
     action_keys = ["arm_left", "arm_right", "lift"]
 
-    def __init__(self, model_path: str, robot: Any, robot_type: str) -> None:
+    def __init__(self, model_path: str, robot: Any, robot_type: str,
+                 ik_backend: str = "cyclo_control", ik_model_path: str = "",
+                 device: str = "cpu") -> None:
+        self.ik_backend = str(ik_backend or "cyclo_control").strip().lower()
+        if self.ik_backend not in {"cyclo_control", "nodeik"}:
+            raise ValueError(f"Unsupported IK backend: {self.ik_backend!r}.")
         if robot_type != "ffw_sg2_rev1":
             raise ValueError(
                 "Dream relative EEF checkpoints require robot_type=ffw_sg2_rev1."
@@ -118,6 +123,17 @@ class RelativeEEFAdapter:
             *self._arm_names["left"], *self._arm_names["right"], self._lift_name
         ]
         self._active_names = active_names
+        if self.ik_backend == "nodeik":
+            from .nodeik import NodeIK
+
+            self.kinematics = NodeIK(ik_model_path, str(urdf_path), active_names, device)
+            missing = set(self.kinematics.image_keys) - {
+                f"observation.images.rgb.{camera}" for camera in robot.camera_names
+            }
+            if missing:
+                raise ValueError(f"Robot cannot supply NodeIK vision cameras: {sorted(missing)}.")
+            logger.info("Relative EEF metadata: %s; IK backend: NodeIK", metadata)
+            return
         native_path = os.environ.get("CYCLO_IK_MODULE_PATH", "/opt/cyclo_ik")
         if native_path not in sys.path:
             sys.path.insert(0, native_path)
@@ -263,7 +279,7 @@ class RelativeEEFAdapter:
             {**self.measured, **seed}, poses["left"], poses["right"]
         )
         if position_error >= 1e-4 or rotation_error >= 1e-3:
-            logger.debug("Cyclo IK residual: position=%.6fm, rotation=%.6frad",
+            logger.debug("IK residual: position=%.6fm, rotation=%.6frad",
                          position_error, rotation_error)
         if not np.isfinite(list(result.values())).all():
             raise ValueError("Shared arm/lift IK produced non-finite joint commands.")

@@ -52,6 +52,10 @@ float64 chunk_align_window_s
 # publish_to_robot is true.
 bool initial_pose_sync
 float64 initial_pose_sync_duration_s
+
+# Relative EEF IK: empty/cyclo_control keeps the current solver; nodeik loads a .pt model.
+string ik_backend
+string ik_model_path
 ---
 bool success
 string message

@@ -203,6 +203,8 @@ class OrchestratorNode(Node):
         self._loaded_inference_publish_to_robot: bool = False
         self._loaded_inference_acceleration_mode: str = 'pytorch'
         self._loaded_inference_acceleration_engine_path: str = ''
+        self._loaded_inference_ik_backend: str = 'cyclo_control'
+        self._loaded_inference_ik_model_path: str = ''
         self._loaded_inference_action_request_mode: str = 'async'
         self._loaded_inference_control_hz: int = 100
         self._loaded_inference_inference_hz: int = 15
@@ -411,6 +413,8 @@ class OrchestratorNode(Node):
             'action_request_mode',
             'acceleration_mode',
             'acceleration_engine_path',
+            'ik_backend',
+            'ik_model_path',
             'initial_pose_sync',
             'initial_pose_sync_duration_s',
         ):
@@ -1471,6 +1475,8 @@ class OrchestratorNode(Node):
                 requested_acceleration_mode, requested_acceleration_engine_path = (
                     self._acceleration_from_task_info(task_info)
                 )
+                requested_ik_backend = str(getattr(task_info, "ik_backend", "") or "cyclo_control")
+                requested_ik_model_path = str(getattr(task_info, "ik_model_path", "") or "").strip()
                 requested_action_request_mode = (
                     self._action_request_mode_from_task_info(task_info)
                 )
@@ -1509,6 +1515,8 @@ class OrchestratorNode(Node):
                     loaded_acceleration_engine_path = (
                         self._loaded_inference_acceleration_engine_path
                     )
+                    loaded_ik_backend = getattr(self, "_loaded_inference_ik_backend", "cyclo_control")
+                    loaded_ik_model_path = getattr(self, "_loaded_inference_ik_model_path", "")
                     loaded_action_request_mode = (
                         self._loaded_inference_action_request_mode
                     )
@@ -1538,6 +1546,7 @@ class OrchestratorNode(Node):
                         loaded_chunk_align_window_s,
                         loaded_initial_pose_sync,
                         loaded_initial_pose_sync_duration_s,
+                        loaded_ik_backend, loaded_ik_model_path,
                     )
                     requested_signature = inference_runtime_signature(
                         requested_policy_path,
@@ -1549,6 +1558,7 @@ class OrchestratorNode(Node):
                         requested_chunk_align_window_s,
                         requested_initial_pose_sync,
                         requested_initial_pose_sync_duration_s,
+                        requested_ik_backend, requested_ik_model_path,
                     )
                     if (
                         requested_policy_path
@@ -1684,6 +1694,8 @@ class OrchestratorNode(Node):
                                     acceleration_engine_path=(
                                         requested_acceleration_engine_path
                                     ),
+                                    ik_backend=requested_ik_backend,
+                                    ik_model_path=requested_ik_model_path,
                                     action_request_mode=requested_action_request_mode,
                                     control_hz=requested_control_hz,
                                     inference_hz=requested_inference_hz,
@@ -1786,6 +1798,8 @@ class OrchestratorNode(Node):
                                     self._loaded_inference_acceleration_engine_path = (
                                         requested_acceleration_engine_path
                                     )
+                                    self._loaded_inference_ik_backend = requested_ik_backend
+                                    self._loaded_inference_ik_model_path = requested_ik_model_path
                                     self._loaded_inference_action_request_mode = (
                                         requested_action_request_mode
                                     )
@@ -2894,6 +2908,8 @@ class OrchestratorNode(Node):
             self._loaded_inference_publish_to_robot = False
             self._loaded_inference_acceleration_mode = 'pytorch'
             self._loaded_inference_acceleration_engine_path = ''
+            self._loaded_inference_ik_backend = 'cyclo_control'
+            self._loaded_inference_ik_model_path = ''
             self._loaded_inference_action_request_mode = 'async'
             self._loaded_inference_control_hz = 100
             self._loaded_inference_inference_hz = 15
@@ -2988,6 +3004,8 @@ class OrchestratorNode(Node):
             self._loaded_inference_publish_to_robot = False
             self._loaded_inference_acceleration_mode = 'pytorch'
             self._loaded_inference_acceleration_engine_path = ''
+            self._loaded_inference_ik_backend = 'cyclo_control'
+            self._loaded_inference_ik_model_path = ''
             self._loaded_inference_action_request_mode = 'async'
             self._loaded_inference_control_hz = 100
             self._loaded_inference_inference_hz = 15

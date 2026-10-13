@@ -43,6 +43,8 @@ string acceleration_mode
 string acceleration_engine_path
 float64 inference_hz
 string simulation_config
+string ik_backend
+string ik_model_path
 """
 
 ENGINE_COMMAND_RESPONSE_DEF = """\
@@ -69,6 +71,8 @@ class EngineCommandRequest:
     acceleration_engine_path: str = ""
     inference_hz: float = 0.0
     simulation_config: str = ""
+    ik_backend: str = ""
+    ik_model_path: str = ""
 
 
 @dataclass
@@ -98,6 +102,8 @@ def request_from_message(message: Any) -> EngineCommandRequest:
         ),
         inference_hz=float(getattr(message, "inference_hz", 0) or 0),
         simulation_config=str(getattr(message, "simulation_config", "") or ""),
+        ik_backend=str(getattr(message, "ik_backend", "") or ""),
+        ik_model_path=str(getattr(message, "ik_model_path", "") or ""),
     )
 
 
@@ -144,6 +150,8 @@ def request_to_message_kwargs(request: EngineCommandRequest) -> dict:
         "acceleration_engine_path": str(request.acceleration_engine_path),
         "inference_hz": float(request.inference_hz),
         "simulation_config": str(request.simulation_config),
+        "ik_backend": str(request.ik_backend),
+        "ik_model_path": str(request.ik_model_path),
     }
 
 

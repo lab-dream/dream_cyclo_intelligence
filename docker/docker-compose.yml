@@ -206,6 +206,7 @@ services:
       # the host tree accidentally).
       - ../cyclo_brain/sdk/zenoh_ros2_sdk:/zenoh_sdk:ro
       - ../cyclo_brain/sdk/robot_client:/robot_client_sdk:ro
+      - ../cyclo_brain/sdk/nodeik:/opt/cyclo_sdk/nodeik:ro
       - ../cyclo_brain/sdk/action_chunk_processing:/action_chunk_processing_sdk:ro
       # Common policy runtime (main-runtime + engine-process + Engine ABC).
       - ../cyclo_brain/policy/common/runtime:/policy_runtime:ro

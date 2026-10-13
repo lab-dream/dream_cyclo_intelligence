@@ -14,9 +14,50 @@ if str(SDK_ROOT) not in sys.path:
     sys.path.insert(0, str(SDK_ROOT))
 
 from action_chunk_processing import ActionChunkProcessor  # noqa: E402
+from action_chunk_processing.spline import quintic_spline_multi  # noqa: E402
 
 
 class ActionChunkProcessorTests(unittest.TestCase):
+    def test_quintic_endpoint_derivatives_and_joint_bounds(self) -> None:
+        start = np.array([-0.4, 0.8, -0.2])  # arm, gripper (rad), lift (m)
+        end = np.array([0.6, 0.2, -0.1])
+        zero = np.zeros(3)
+        for t, expected in ((0.0, start), (0.25, end)):
+            result = quintic_spline_multi(t, 0.0, 0.25, start, zero, zero,
+                                          end, zero, zero)
+            np.testing.assert_allclose(result[0], expected, atol=1e-12)
+            np.testing.assert_allclose(result[1:], 0.0, atol=1e-10)
+        positions = np.array([quintic_spline_multi(
+            t, 0.0, 0.25, start, zero, zero, end, zero, zero)[0]
+            for t in np.linspace(0.0, 0.25, 101)])
+        self.assertTrue(np.all(positions >= np.minimum(start, end) - 1e-12))
+        self.assertTrue(np.all(positions <= np.maximum(start, end) + 1e-12))
+
+    def test_quintic_resampling_and_fixed_target_use_same_curve(self) -> None:
+        chunk = np.array([[0.0, -0.2], [1.0, -0.1]])
+        for target in (None, 5):
+            processor = ActionChunkProcessor(
+                inference_hz=1.0, control_hz=4.0, alignment_mode="none",
+                interpolation_method="quintic", target_chunk_size=target)
+            produced = processor.push_actions(chunk)
+            positions = np.array([processor.pop_action() for _ in range(produced)])
+            self.assertEqual(produced, 4 if target is None else 5)
+            # At 1/4 of the interval, quintic differs from linear interpolation.
+            np.testing.assert_allclose(positions[1], [0.103515625, -0.1896484375])
+            np.testing.assert_allclose(positions[2], [0.5, -0.15])
+            if target is not None:
+                np.testing.assert_allclose(positions[-1], chunk[-1])
+
+    def test_quintic_chunk_transition_uses_smooth_blend_weight(self) -> None:
+        processor = ActionChunkProcessor(
+            inference_hz=1.0, control_hz=10.0, alignment_mode="none",
+            interpolation_method="quintic")
+        processor._last_output_action = np.array([0.0])
+        processor.push_actions(np.array([[1.0], [1.0]]))
+        np.testing.assert_allclose(processor.pop_action(), [17 / 81])
+        np.testing.assert_allclose(processor.pop_action(), [64 / 81])
+        np.testing.assert_allclose(processor.pop_action(), [1.0])
+
     def test_dynamic_resampling_preserves_legacy_16_step_timing(self) -> None:
         processor = ActionChunkProcessor(
             inference_hz=15.0,

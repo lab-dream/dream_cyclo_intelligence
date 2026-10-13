@@ -150,12 +150,26 @@ class ControlLoopSafetyTests(unittest.TestCase):
             postprocess=True,
             target_chunk_size=None,
             alignment_mode="l2",
+            interpolation_method="linear",
         )
         self.assertIn(
             "control_hz=50 inference_hz=20 chunk_align_window_s=0.25",
             "\n".join(logs.output),
         )
         self.assertEqual(loop._tick_period(), 1.0 / processor.output_hz)
+
+    def test_nodeik_selects_quintic_for_the_control_command_path(self) -> None:
+        for backend, expected in (("nodeik", 0.103515625), ("cyclo_control", 0.25)):
+            with self.subTest(backend=backend), mock.patch.object(
+                control_loop_module, "RobotClient", return_value=FakeRobot()
+            ):
+                loop = ControlLoop(requester=object())
+                loop.configure(robot_type="ffw", ik_backend=backend,
+                               inference_hz=1.0, control_hz=4.0)
+                loop._processor.push_actions(np.array([[0.0], [1.0]]))
+                loop._processor.pop_action()
+                np.testing.assert_allclose(loop._processor.pop_action(), [expected])
+                loop.deconfigure()
 
     def test_configure_invalid_timing_uses_constructor_defaults(self) -> None:
         loop = ControlLoop(

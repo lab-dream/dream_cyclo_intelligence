@@ -70,6 +70,8 @@ export const normalizeInferenceTaskInfo = (taskInfo = {}) => ({
   actionRequestMode: actionRequestModeOrDefault(taskInfo.actionRequestMode),
   accelerationMode: String(taskInfo.accelerationMode ?? 'pytorch').trim(),
   accelerationEnginePath: String(taskInfo.accelerationEnginePath ?? '').trim(),
+  ikBackend: String(taskInfo.ikBackend || 'cyclo_control').trim(),
+  ikModelPath: String(taskInfo.ikModelPath ?? '').trim(),
   initialPoseSync: Boolean(taskInfo.initialPoseSync),
   initialPoseSyncDurationS: numberOrDefault(
     taskInfo.initialPoseSyncDurationS ?? 5.0,
@@ -96,6 +98,8 @@ export const rosTaskInfoToUiTaskInfo = (taskInfo = {}) => ({
   actionRequestMode: actionRequestModeOrDefault(taskInfo.action_request_mode),
   accelerationMode: taskInfo.acceleration_mode || 'pytorch',
   accelerationEnginePath: taskInfo.acceleration_engine_path || '',
+  ikBackend: taskInfo.ik_backend || 'cyclo_control',
+  ikModelPath: taskInfo.ik_model_path || '/workspace/model/nodeik/nodeik_20261010_e2e30k',
   initialPoseSync: Boolean(taskInfo.initial_pose_sync),
   initialPoseSyncDurationS: numberOrDefault(
     taskInfo.initial_pose_sync_duration_s,
