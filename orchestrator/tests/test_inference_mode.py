@@ -106,6 +106,14 @@ class InferenceModeTests(unittest.TestCase):
         self.assertNotEqual(nodeik, inference_runtime_signature(*args, ik_backend="nodeik", ik_model_path="/models/vision"))
         self.assertEqual(native, inference_runtime_signature(*args, ik_model_path="/unused/model"))
 
+    def test_runtime_signature_reloads_when_chunkrl_checkpoint_changes(self) -> None:
+        args = ("/model", "pytorch", "", "chunkrl", 100, 30, .3)
+        self.assertNotEqual(inference_runtime_signature(*args, chunkrl_checkpoint="/a.pt"),
+                            inference_runtime_signature(*args, chunkrl_checkpoint="/b.pt"))
+        args = ("/model", "pytorch", "", "async", 100, 30, .3)
+        self.assertEqual(inference_runtime_signature(*args, chunkrl_checkpoint="/a.pt"),
+                         inference_runtime_signature(*args, chunkrl_checkpoint="/b.pt"))
+
     def test_runtime_signature_changes_with_initial_pose_sync(self) -> None:
         base = inference_runtime_signature(
             "/models/policy", "pytorch", "", "async", 100, 15, 0.3,

@@ -118,6 +118,7 @@ class LeRobotEngine(
         self._device: Optional[torch.device] = None
         self._loaded_model_path: Optional[str] = None
         self._relative_eef = None
+        self._chunkrl = None
 
         # Resolved after load: which cameras / joint groups feed which
         # policy keys. ``_cameras`` maps RobotClient camera name → policy
@@ -187,6 +188,7 @@ class LeRobotEngine(
                 self._preprocessor = preprocessor
                 self._postprocessor = postprocessor
                 self._loaded_model_path = model_path
+                self._base_n_action_steps = getattr(policy.config, "n_action_steps", None)
                 self._apply_policy_optimization(model_path, request)
 
             self._teardown_robot()
@@ -198,6 +200,8 @@ class LeRobotEngine(
             self._loaded_robot_type = robot_type
             self._image_resize = self._infer_image_resize(self._policy)
             self._configure_relative_eef(model_path, robot_type, request)
+            from .chunkrl import configure_chunkrl
+            configure_chunkrl(self, request)
             self._dataset_simulation = dataset_robot
 
             return {
@@ -206,7 +210,8 @@ class LeRobotEngine(
                     "LeRobot inference restarted (policy cached)"
                     if cache_hit
                     else f"loaded {model_path}"
-                ) + (f" (relative EEF → {self._relative_eef.ik_backend})" if self._relative_eef is not None else ""),
+                ) + (f" (relative EEF → {self._relative_eef.ik_backend})" if self._relative_eef is not None else "")
+                + (f" (ChunkRL per arm, L={self._chunkrl.length})" if self._chunkrl is not None else ""),
                 "action_keys": list(self._action_keys),
             }
         except Exception as e:
@@ -217,6 +222,10 @@ class LeRobotEngine(
     def get_action_chunk(self, request: Any) -> Dict[str, Any]:
         if not self.is_ready:
             return self._fail("Not in inference mode")
+        manager = getattr(self, "_chunkrl", None)
+        if manager is not None and getattr(request, "reset_policy_state", False):
+            manager.reset()
+        snapshot = manager.snapshot() if manager is not None else None
         try:
             obs = self._build_policy_observation(getattr(request, "task_instruction", ""))
             if "success" in obs:
@@ -228,6 +237,9 @@ class LeRobotEngine(
                 action = self._postprocessor(action)
 
             chunk = self._to_numpy_chunk(action)
+            if manager is not None:
+                chunk = manager.select(chunk, self._relative_eef.env_obs)
+                logger.info("ChunkRL decisions: %s", manager.last_decisions)
             if getattr(self, "_dataset_simulation", None) is not None:
                 self._dataset_simulation.relative_action = chunk.copy()
             if self._relative_eef is not None:
@@ -245,6 +257,8 @@ class LeRobotEngine(
                 "action_dim": int(D),
             }
         except Exception as e:
+            if manager is not None:
+                manager.restore(snapshot)
             logger.error("get_action_chunk failed: %s", e, exc_info=True)
             return self._fail(str(e))
 
@@ -265,6 +279,8 @@ class LeRobotEngine(
             logger.info("Releasing LeRobot policy: %s", self._loaded_model_path)
 
         self._policy = None
+        self._chunkrl = None
+        self._base_n_action_steps = None
         self._preprocessor = None
         self._postprocessor = None
         self._device = None

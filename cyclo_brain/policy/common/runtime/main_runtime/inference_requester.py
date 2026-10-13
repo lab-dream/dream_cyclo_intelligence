@@ -60,13 +60,15 @@ class InferenceRequester:
             inference_hz=float(getattr(request, "inference_hz", 0) or 0),
             ik_backend=str(getattr(request, "ik_backend", "") or ""),
             ik_model_path=str(getattr(request, "ik_model_path", "") or ""),
+            action_request_mode=str(getattr(request, "action_request_mode", "") or ""),
+            chunkrl_checkpoint=str(getattr(request, "chunkrl_checkpoint", "") or ""),
         )
         return self._call(
             engine_request,
             self._load_policy_timeout_s if timeout_s is None else timeout_s,
         )
 
-    def get_action(self, task_instruction: str, timeout_s: float | None = None) -> EngineCommandResponse:
+    def get_action(self, task_instruction: str, timeout_s: float | None = None, *, reset_policy_state: bool = False) -> EngineCommandResponse:
         with self._lock:
             if self._get_action_in_flight:
                 return EngineCommandResponse(
@@ -80,6 +82,7 @@ class InferenceRequester:
             command=CMD_GET_ACTION,
             seq_id=seq_id,
             task_instruction=task_instruction or "",
+            reset_policy_state=reset_policy_state,
         )
         try:
             return self._call(

@@ -204,6 +204,8 @@ def dataset_simulation_command(engine, request):
     return {
         "episode": robot.episode, "frame": robot.frame, "length": robot.length,
         "fps": robot.fps, "ik_backend": adapter.ik_backend,
+        "action_request_mode": "chunkrl" if getattr(engine, "_chunkrl", None) is not None else str(getattr(request, "action_request_mode", "") or "sync"),
+        "chunkrl_decisions": engine._chunkrl.last_decisions if getattr(engine, "_chunkrl", None) is not None else [],
         "finished": robot.frame >= robot.length - 1, "frames": frames,
         "observation_relative": robot.relative_observation.tolist(),
         "action_relative": relative_action.tolist() if relative_action is not None else [],

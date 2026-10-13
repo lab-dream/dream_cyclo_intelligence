@@ -30,6 +30,7 @@ string inference_mode
 
 # Action chunk request scheduling. "async" requests the next chunk while the
 # current buffer is still executing. "sync" waits until the buffer is empty.
+# "chunkrl" uses per-arm decisions for relative EEF Diffusion, one waypoint at a time.
 string action_request_mode
 
 # Policy acceleration mode. Empty and "pytorch" mean the normal model path.
@@ -48,3 +49,5 @@ float64 initial_pose_sync_duration_s
 # Relative EEF IK: empty/cyclo_control keeps the current solver; nodeik loads a .pt model.
 string ik_backend
 string ik_model_path
+# Per-arm decider checkpoint, used only with action_request_mode=chunkrl.
+string chunkrl_checkpoint

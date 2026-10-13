@@ -87,6 +87,55 @@ The engine and copied helpers are bind-mounted. Both source Dockerfiles install
 SciPy and build the native Cyclo binding against their Pinocchio installation.
 The SDK build context is supplied by Compose's `additional_contexts` entry.
 
+### Per-arm ChunkRL after Diffusion
+
+For a relative EEF Diffusion policy, **Action Request** offers **Async**, **Sync**,
+and **ChunkRL**. Select **Use local relative Diffusion model** for the local
+482000 checkpoint. The existing 964000 preset is a 22-dimensional joint-action
+policy and cannot use the 10-dimensional per-arm decider. Unload before changing
+an active session's model, mode, or IK backend.
+
+Prepare the existing actor in the shared workspace; weights are not committed:
+
+```bash
+python docker/scripts/stage_chunkrl.py /path/to/chunk_rl
+```
+
+The default checkpoint is
+`/workspace/model/chunkrl/robomimic_multitask_v5/best_eval.pt`. It uses `L=14`,
+`H=8`, and `d_a=10`. ChunkRL mode changes Diffusion's output window to 14; loading
+Async/Sync restores its original window. After policy denormalization, the
+20-dimensional EEF output splits into two arm trajectories. Each arm keeps its
+own history and active chunk while sharing the frozen actor. The bridge converts
+UMI row-based rot6d to ChunkRL column-based rot6d and back, anchoring kept targets
+at their original world poses before the existing bimanual IK and shared lift.
+
+ChunkRL waits for the selected waypoint to finish before requesting another
+prediction. It uses a joint transition to reach that target without chunk
+alignment/blending. START/RESUME and failed or discarded requests reset decider
+state; IK failures roll back both arms together. Rebuild ROS interfaces and the
+UI, then restart orchestrator and policy Main/Engine after updating the wire
+fields. The same mode is available in dataset feedback simulation.
+
+On another machine, initialize the submodules and build the LeRobot image:
+
+```bash
+git submodule update --init --recursive
+docker compose -f docker/docker-compose.yml build lerobot
+```
+
+Place your relative EEF Diffusion checkpoint and original joint-dataset metadata
+in the mounted workspace as described above. Select its container-visible path
+in the GUI; the local 482000 preset is only a convenience. The actor loads from
+the selected `.pt` file and does not require a separate ChunkRL checkout at
+runtime. Rebuild `interfaces` and `orchestrator` in the Cyclo container, rebuild
+the GUI, and restart orchestrator and policy Main/Engine after updating.
+
+The actor was trained in Robomimic's single-arm environment. Its transfer quality
+and request latency depend on the Diffusion checkpoint, IK solver, and hardware;
+Dataset FPS configures trajectory intervals rather than guaranteeing that
+replanning can run at that frequency.
+
 ### Select Cyclo Control or NodeIK
 
 In **Inference**, choose LeRobot / Diffusion and use **EEF IK** to select

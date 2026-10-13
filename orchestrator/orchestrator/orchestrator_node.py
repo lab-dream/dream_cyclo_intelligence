@@ -206,6 +206,7 @@ class OrchestratorNode(Node):
         self._loaded_inference_ik_backend: str = 'cyclo_control'
         self._loaded_inference_ik_model_path: str = ''
         self._loaded_inference_action_request_mode: str = 'async'
+        self._loaded_inference_chunkrl_checkpoint: str = ''
         self._loaded_inference_control_hz: int = 100
         self._loaded_inference_inference_hz: int = 15
         self._loaded_inference_chunk_align_window_s: float = 0.3
@@ -415,6 +416,7 @@ class OrchestratorNode(Node):
             'acceleration_engine_path',
             'ik_backend',
             'ik_model_path',
+            'chunkrl_checkpoint',
             'initial_pose_sync',
             'initial_pose_sync_duration_s',
         ):
@@ -1477,6 +1479,7 @@ class OrchestratorNode(Node):
                 )
                 requested_ik_backend = str(getattr(task_info, "ik_backend", "") or "cyclo_control")
                 requested_ik_model_path = str(getattr(task_info, "ik_model_path", "") or "").strip()
+                requested_chunkrl_checkpoint = str(getattr(task_info, "chunkrl_checkpoint", "") or "").strip()
                 requested_action_request_mode = (
                     self._action_request_mode_from_task_info(task_info)
                 )
@@ -1547,6 +1550,7 @@ class OrchestratorNode(Node):
                         loaded_initial_pose_sync,
                         loaded_initial_pose_sync_duration_s,
                         loaded_ik_backend, loaded_ik_model_path,
+                        getattr(self, "_loaded_inference_chunkrl_checkpoint", ""),
                     )
                     requested_signature = inference_runtime_signature(
                         requested_policy_path,
@@ -1559,6 +1563,7 @@ class OrchestratorNode(Node):
                         requested_initial_pose_sync,
                         requested_initial_pose_sync_duration_s,
                         requested_ik_backend, requested_ik_model_path,
+                        requested_chunkrl_checkpoint,
                     )
                     if (
                         requested_policy_path
@@ -1696,6 +1701,7 @@ class OrchestratorNode(Node):
                                     ),
                                     ik_backend=requested_ik_backend,
                                     ik_model_path=requested_ik_model_path,
+                                    chunkrl_checkpoint=requested_chunkrl_checkpoint,
                                     action_request_mode=requested_action_request_mode,
                                     control_hz=requested_control_hz,
                                     inference_hz=requested_inference_hz,
@@ -1800,6 +1806,7 @@ class OrchestratorNode(Node):
                                     )
                                     self._loaded_inference_ik_backend = requested_ik_backend
                                     self._loaded_inference_ik_model_path = requested_ik_model_path
+                                    self._loaded_inference_chunkrl_checkpoint = requested_chunkrl_checkpoint
                                     self._loaded_inference_action_request_mode = (
                                         requested_action_request_mode
                                     )
@@ -2831,8 +2838,8 @@ class OrchestratorNode(Node):
     @staticmethod
     def _normalize_action_request_mode(value: str) -> str:
         mode = str(value or '').strip().lower()
-        if mode == 'sync':
-            return 'sync'
+        if mode in {'sync', 'chunkrl'}:
+            return mode
         return 'async'
 
     @classmethod
@@ -2911,6 +2918,7 @@ class OrchestratorNode(Node):
             self._loaded_inference_ik_backend = 'cyclo_control'
             self._loaded_inference_ik_model_path = ''
             self._loaded_inference_action_request_mode = 'async'
+            self._loaded_inference_chunkrl_checkpoint = ''
             self._loaded_inference_control_hz = 100
             self._loaded_inference_inference_hz = 15
             self._loaded_inference_chunk_align_window_s = 0.3
@@ -3007,6 +3015,7 @@ class OrchestratorNode(Node):
             self._loaded_inference_ik_backend = 'cyclo_control'
             self._loaded_inference_ik_model_path = ''
             self._loaded_inference_action_request_mode = 'async'
+            self._loaded_inference_chunkrl_checkpoint = ''
             self._loaded_inference_control_hz = 100
             self._loaded_inference_inference_hz = 15
             self._loaded_inference_chunk_align_window_s = 0.3

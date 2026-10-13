@@ -180,3 +180,33 @@ describe('InferencePanel initial pose sync settings', () => {
       .toHaveTextContent('Dataset FPS is unusually high (1515)');
   });
 });
+
+
+describe('ChunkRL inference mode', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
+
+  test('selects ChunkRL and sends its checkpoint through task synchronization', async () => {
+    const { store, sendRecordCommand } = renderPanel({ policyType: 'diffusion' });
+    fireEvent.click(screen.getByRole('button', { name: 'Use ChunkRL action requests' }));
+    expect(store.getState().tasks.inferenceTaskInfo.actionRequestMode).toBe('chunkrl');
+    const input = screen.getByLabelText('ChunkRL checkpoint');
+    fireEvent.change(input, { target: { value: '/workspace/model/chunkrl/custom.pt' } });
+    await act(async () => { jest.advanceTimersByTime(700); });
+    expect(store.getState().tasks.inferenceTaskInfo.chunkrlCheckpoint).toBe('/workspace/model/chunkrl/custom.pt');
+    expect(sendRecordCommand).toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Use local relative Diffusion model'));
+    expect(store.getState().tasks.inferenceTaskInfo.policyPath).toContain('diffusion_task0_relative_482000');
+    expect(store.getState().tasks.inferenceTaskInfo.inferenceHz).toBe(30);
+  });
+
+  test('keeps ChunkRL unavailable to non-Diffusion policies', () => {
+    renderPanel({ policyType: 'act' });
+    expect(screen.queryByRole('button', { name: 'Use ChunkRL action requests' })).not.toBeInTheDocument();
+  });
+
+  test('locks ChunkRL mode while a model is active', () => {
+    renderPanel({ policyType: 'diffusion', inferencePhase: InferencePhase.INFERENCING });
+    expect(screen.getByRole('button', { name: 'Use ChunkRL action requests' })).toBeDisabled();
+  });
+});

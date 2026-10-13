@@ -47,7 +47,8 @@ logger = get_logger("main_runtime.control_loop")
 
 ACTION_REQUEST_MODE_ASYNC = "async"
 ACTION_REQUEST_MODE_SYNC = "sync"
-ACTION_REQUEST_MODES = {ACTION_REQUEST_MODE_ASYNC, ACTION_REQUEST_MODE_SYNC}
+ACTION_REQUEST_MODE_CHUNKRL = "chunkrl"
+ACTION_REQUEST_MODES = {ACTION_REQUEST_MODE_ASYNC, ACTION_REQUEST_MODE_SYNC, ACTION_REQUEST_MODE_CHUNKRL}
 
 
 def positive_finite_or_default(value: object, default: float) -> float:
@@ -62,8 +63,8 @@ def positive_finite_or_default(value: object, default: float) -> float:
 
 def normalize_action_request_mode(value: object) -> str:
     mode = str(value or "").strip().lower()
-    if mode == ACTION_REQUEST_MODE_SYNC:
-        return ACTION_REQUEST_MODE_SYNC
+    if mode in ACTION_REQUEST_MODES:
+        return mode
     return ACTION_REQUEST_MODE_ASYNC
 
 
@@ -118,6 +119,7 @@ class ControlLoop:
         self._action_keys: list[str] = []
         self._publish_to_robot = False
         self._running = False
+        self._chunkrl_reset_pending = True
         self._initial_pose_sync_enabled = False
         self._initial_pose_sync_duration_s = 5.0
         self._initial_pose_sync_in_progress = False
@@ -244,6 +246,7 @@ class ControlLoop:
                 and self._publish_to_robot
                 and not self._initial_pose_sync_completed
             )
+            self._chunkrl_reset_pending = True
             if not should_sync:
                 self._running = True
                 return False
@@ -260,7 +263,10 @@ class ControlLoop:
             self._initial_pose_sync_deadline = None
 
         started_at = time.monotonic()
-        response = self._requester.get_action(task_instruction)
+        if self._action_request_mode == ACTION_REQUEST_MODE_CHUNKRL:
+            response = self._requester.get_action(task_instruction, reset_policy_state=True)
+        else:
+            response = self._requester.get_action(task_instruction)
         latency_s = time.monotonic() - started_at
         self._record_request_latency(latency_s)
         chunk = self._decode_action_response(response)
@@ -461,10 +467,18 @@ class ControlLoop:
         action_request_mode = normalize_action_request_mode(action_request_mode)
         started_at = time.monotonic()
         try:
-            response = self._requester.get_action(task_instruction)
+            if action_request_mode == ACTION_REQUEST_MODE_CHUNKRL:
+                with self._lock:
+                    reset_pending = self._chunkrl_reset_pending
+                response = self._requester.get_action(task_instruction, reset_policy_state=reset_pending)
+            else:
+                response = self._requester.get_action(task_instruction)
         except Exception as e:
             latency_s = time.monotonic() - started_at
             self._record_request_latency(latency_s)
+            with self._lock:
+                if generation == self._generation:
+                    self._chunkrl_reset_pending = True
             logger.warning("get_action raised: %s", e)
             return
         latency_s = time.monotonic() - started_at
@@ -472,6 +486,9 @@ class ControlLoop:
         try:
             chunk = self._decode_action_response(response)
         except ValueError as e:
+            with self._lock:
+                if generation == self._generation:
+                    self._chunkrl_reset_pending = True
             logger.warning("get_action response rejected: %s", e)
             return
         with self._lock:
@@ -487,14 +504,22 @@ class ControlLoop:
 
                 scheduled_start_delay_s = (
                     None
-                    if action_request_mode == ACTION_REQUEST_MODE_SYNC
+                    if action_request_mode in {ACTION_REQUEST_MODE_SYNC, ACTION_REQUEST_MODE_CHUNKRL}
                     else latency_s + buffer_delay_s
                 )
-                produced = self._processor.push_actions(
-                    chunk,
-                    scheduled_start_delay_s=scheduled_start_delay_s,
-                    align=action_request_mode != ACTION_REQUEST_MODE_SYNC,
-                )
+                if action_request_mode == ACTION_REQUEST_MODE_CHUNKRL:
+                    if len(chunk) != 1:
+                        self._chunkrl_reset_pending = True
+                        logger.warning("ChunkRL must return exactly one selected waypoint")
+                        return
+                    produced = self._processor.push_waypoint(chunk[0])
+                    self._chunkrl_reset_pending = False
+                else:
+                    produced = self._processor.push_actions(
+                        chunk,
+                        scheduled_start_delay_s=scheduled_start_delay_s,
+                        align=action_request_mode != ACTION_REQUEST_MODE_SYNC,
+                    )
                 scheduled_start_text = (
                     "none"
                     if scheduled_start_delay_s is None
@@ -532,7 +557,7 @@ class ControlLoop:
     def _should_request_actions(self, processor: ActionChunkProcessor) -> bool:
         if self._request_thread is not None and self._request_thread.is_alive():
             return False
-        if self._action_request_mode == ACTION_REQUEST_MODE_SYNC:
+        if self._action_request_mode in {ACTION_REQUEST_MODE_SYNC, ACTION_REQUEST_MODE_CHUNKRL}:
             return processor.buffer_size <= 0
         return processor.buffer_size < self._refill_threshold(processor)
 

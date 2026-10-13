@@ -384,6 +384,7 @@ class ContainerServiceClient:
         timeout_sec: Optional[float] = None,
         ik_backend: str = "",
         ik_model_path: str = "",
+        chunkrl_checkpoint: str = "",
     ) -> ServiceResponse:
         """Call /{prefix}/inference_command (InferenceCommand.srv).
 
@@ -412,6 +413,7 @@ class ContainerServiceClient:
         request.task_instruction = task_instruction
         request.ik_backend = str(ik_backend or "cyclo_control")
         request.ik_model_path = str(ik_model_path or "")
+        request.chunkrl_checkpoint = str(chunkrl_checkpoint or "")
         if hasattr(request, "publish_to_robot"):
             request.publish_to_robot = bool(publish_to_robot)
         if hasattr(request, "action_request_mode"):

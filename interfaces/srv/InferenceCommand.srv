@@ -35,6 +35,7 @@ string task_instruction
 bool publish_to_robot
 # Action chunk request scheduling at LOAD time. Empty / "async" preserves the
 # current prefetch behavior. "sync" requests only after the active buffer drains.
+# "chunkrl" uses per-arm decisions for relative EEF Diffusion, one waypoint at a time.
 string action_request_mode
 # Runtime acceleration selected at LOAD time. Empty / "pytorch" means normal
 # PyTorch inference. "tensorrt_dit" enables GR00T DiT-only TensorRT when
@@ -56,6 +57,8 @@ float64 initial_pose_sync_duration_s
 # Relative EEF IK: empty/cyclo_control keeps the current solver; nodeik loads a .pt model.
 string ik_backend
 string ik_model_path
+# Per-arm decider checkpoint, used only with action_request_mode=chunkrl.
+string chunkrl_checkpoint
 ---
 bool success
 string message

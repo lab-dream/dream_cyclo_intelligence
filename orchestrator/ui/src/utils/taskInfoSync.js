@@ -32,9 +32,10 @@ const editableNumberOrDefault = (value, fallback) => (
   value === '' ? '' : numberOrDefault(value, fallback)
 );
 
-const actionRequestModeOrDefault = (value) => (
-  String(value ?? '').trim().toLowerCase() === 'sync' ? 'sync' : 'async'
-);
+export const actionRequestModeOrDefault = (value) => {
+  const mode = String(value ?? '').trim().toLowerCase();
+  return ['async', 'sync', 'chunkrl'].includes(mode) ? mode : 'async';
+};
 
 export const normalizeRecordTaskInfo = (taskInfo = {}) => ({
   taskNum: String(taskInfo.taskNum ?? '').trim(),
@@ -72,6 +73,7 @@ export const normalizeInferenceTaskInfo = (taskInfo = {}) => ({
   accelerationEnginePath: String(taskInfo.accelerationEnginePath ?? '').trim(),
   ikBackend: String(taskInfo.ikBackend || 'cyclo_control').trim(),
   ikModelPath: String(taskInfo.ikModelPath ?? '').trim(),
+  chunkrlCheckpoint: String(taskInfo.chunkrlCheckpoint ?? '').trim(),
   initialPoseSync: Boolean(taskInfo.initialPoseSync),
   initialPoseSyncDurationS: numberOrDefault(
     taskInfo.initialPoseSyncDurationS ?? 5.0,
@@ -100,6 +102,7 @@ export const rosTaskInfoToUiTaskInfo = (taskInfo = {}) => ({
   accelerationEnginePath: taskInfo.acceleration_engine_path || '',
   ikBackend: taskInfo.ik_backend || 'cyclo_control',
   ikModelPath: taskInfo.ik_model_path || '/workspace/model/nodeik/nodeik_20261010_e2e30k',
+  chunkrlCheckpoint: taskInfo.chunkrl_checkpoint || '/workspace/model/chunkrl/robomimic_multitask_v5/best_eval.pt',
   initialPoseSync: Boolean(taskInfo.initial_pose_sync),
   initialPoseSyncDurationS: numberOrDefault(
     taskInfo.initial_pose_sync_duration_s,

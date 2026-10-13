@@ -63,6 +63,7 @@ class ActionChunkProcessor:
         self._buffer: collections.deque = collections.deque()
         self._last_action: Optional[np.ndarray] = None
         self._last_output_action: Optional[np.ndarray] = None
+        self._waypoint_tick_remainder = 0.0
         self._lock = threading.Lock()
 
     @property
@@ -131,11 +132,37 @@ class ActionChunkProcessor:
                 return action
             return None
 
+    def push_waypoint(self, waypoint: np.ndarray) -> int:
+        """Execute one selected waypoint over one dataset interval, without alignment.
+
+        ChunkRL already selects the trajectory index. Interpolate only the joint
+        transition and reach the target exactly instead of blending it away.
+        """
+        target = np.asarray(waypoint, dtype=np.float64)
+        if target.ndim != 1 or not np.isfinite(target).all():
+            raise ValueError("waypoint must be a finite action vector")
+        with self._lock:
+            anchor = self._alignment_anchor()
+            ticks = max(1.0, self._control_hz / self._inference_hz) + self._waypoint_tick_remainder
+            count = max(1, int(np.floor(ticks + 1e-9))) if self._postprocess else 1
+            self._waypoint_tick_remainder = ticks - count if self._postprocess else 0.0
+            if anchor is None:
+                outputs = np.repeat(target[None], count, axis=0)
+            else:
+                alpha = np.arange(1, count + 1, dtype=float) / count
+                if self._interpolation_method == "quintic":
+                    alpha = 10 * alpha**3 - 15 * alpha**4 + 6 * alpha**5
+                outputs = anchor[None] + alpha[:, None] * (target - anchor)[None]
+            self._buffer.extend(outputs)
+            self._last_action = target.copy()
+            return count
+
     def clear(self) -> None:
         with self._lock:
             self._buffer.clear()
             self._last_action = None
             self._last_output_action = None
+            self._waypoint_tick_remainder = 0.0
 
     def _alignment_anchor(self) -> Optional[np.ndarray]:
         if self._buffer:

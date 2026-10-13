@@ -45,6 +45,9 @@ float64 inference_hz
 string simulation_config
 string ik_backend
 string ik_model_path
+string action_request_mode
+string chunkrl_checkpoint
+bool reset_policy_state
 """
 
 ENGINE_COMMAND_RESPONSE_DEF = """\
@@ -73,6 +76,9 @@ class EngineCommandRequest:
     simulation_config: str = ""
     ik_backend: str = ""
     ik_model_path: str = ""
+    action_request_mode: str = ""
+    chunkrl_checkpoint: str = ""
+    reset_policy_state: bool = False
 
 
 @dataclass
@@ -104,6 +110,9 @@ def request_from_message(message: Any) -> EngineCommandRequest:
         simulation_config=str(getattr(message, "simulation_config", "") or ""),
         ik_backend=str(getattr(message, "ik_backend", "") or ""),
         ik_model_path=str(getattr(message, "ik_model_path", "") or ""),
+        action_request_mode=str(getattr(message, "action_request_mode", "") or ""),
+        chunkrl_checkpoint=str(getattr(message, "chunkrl_checkpoint", "") or ""),
+        reset_policy_state=bool(getattr(message, "reset_policy_state", False)),
     )
 
 
@@ -152,6 +161,9 @@ def request_to_message_kwargs(request: EngineCommandRequest) -> dict:
         "simulation_config": str(request.simulation_config),
         "ik_backend": str(request.ik_backend),
         "ik_model_path": str(request.ik_model_path),
+        "action_request_mode": str(request.action_request_mode),
+        "chunkrl_checkpoint": str(request.chunkrl_checkpoint),
+        "reset_policy_state": bool(request.reset_policy_state),
     }
 
 

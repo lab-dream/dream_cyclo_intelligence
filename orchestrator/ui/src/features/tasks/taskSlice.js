@@ -19,6 +19,7 @@
 import { createSelector, createSlice } from '@reduxjs/toolkit';
 import { RecordPhase, InferencePhase } from '../../constants/taskPhases';
 import {
+  actionRequestModeOrDefault,
   getInferenceTaskInfoKey,
   getRecordTaskInfoKey,
 } from '../../utils/taskInfoSync';
@@ -118,6 +119,7 @@ const inferenceTaskInfoInitialState = {
   policyType: 'act',
   inferenceMode: 'simulation',
   actionRequestMode: 'async',
+  chunkrlCheckpoint: '/workspace/model/chunkrl/robomimic_multitask_v5/best_eval.pt',
   accelerationMode: 'pytorch',
   accelerationEnginePath: '',
   ikBackend: 'cyclo_control',
@@ -145,10 +147,7 @@ const copyInferenceTaskInfo = (
 ) => ({
   ...inferenceTaskInfoInitialState,
   ...inferenceTaskInfo,
-  actionRequestMode:
-    String(inferenceTaskInfo.actionRequestMode || '').trim().toLowerCase() === 'sync'
-      ? 'sync'
-      : 'async',
+  actionRequestMode: actionRequestModeOrDefault(inferenceTaskInfo.actionRequestMode),
 });
 
 const selectTasksState = (state) => state.tasks || state;
@@ -297,12 +296,9 @@ const applyInferenceTaskInfo = (state, taskInfo = {}) => {
     inferenceMode:
       String(taskInfo.inferenceMode ?? state.inferenceTaskInfo.inferenceMode ?? 'simulation') ||
       'simulation',
-    actionRequestMode:
-      String(
-        taskInfo.actionRequestMode ?? state.inferenceTaskInfo.actionRequestMode ?? ''
-      ).trim().toLowerCase() === 'sync'
-        ? 'sync'
-        : 'async',
+    actionRequestMode: actionRequestModeOrDefault(
+      taskInfo.actionRequestMode ?? state.inferenceTaskInfo.actionRequestMode),
+    chunkrlCheckpoint: String(taskInfo.chunkrlCheckpoint ?? state.inferenceTaskInfo.chunkrlCheckpoint ?? ''),
     accelerationMode: String(
       taskInfo.accelerationMode ?? state.inferenceTaskInfo.accelerationMode ?? 'pytorch'
     ),
@@ -415,6 +411,10 @@ const taskSlice = createSlice({
     },
     setInferenceTaskInfo: (state, action) => {
       applyInferenceTaskInfo(state, action.payload || {});
+      if (state.inferenceTaskInfo.actionRequestMode === 'chunkrl' &&
+          (state.inferenceTaskInfo.serviceType !== 'lerobot' || state.inferenceTaskInfo.policyType !== 'diffusion')) {
+        state.inferenceTaskInfo.actionRequestMode = 'async';
+      }
     },
     setSharedTaskInstruction: (state, action) => {
       state.sharedTaskInfo.taskInstruction = stringArray(action.payload);

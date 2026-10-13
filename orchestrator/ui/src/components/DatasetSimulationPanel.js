@@ -70,13 +70,15 @@ export default function DatasetSimulationPanel({ enabled, active = true, onEnabl
       robot_type: robotType,
       ik_backend: info.ikBackend || 'cyclo_control',
       ik_model_path: info.ikModelPath || '',
+      action_request_mode: info.actionRequestMode || 'async',
+      chunkrl_checkpoint: info.chunkrlCheckpoint || '',
       task_instruction: info.taskInstruction?.[0] || '',
       inference_hz: Number(info.inferenceHz) || 30,
       simulation_config: JSON.stringify({ dataset_path: datasetPath, episode: Number(episode), frame: Number(initialFrame), control_hz: Number(info.controlHz) || 100 }),
     }, 0);
     if (!response.success) throw new Error(response.message || 'Dataset simulation failed');
     return JSON.parse(response.simulation_state);
-  }, [callService, info.policyPath, info.taskInstruction, info.inferenceHz, info.controlHz, info.ikBackend, info.ikModelPath, robotType, datasetPath, episode, initialFrame]);
+  }, [callService, info.policyPath, info.taskInstruction, info.inferenceHz, info.controlHz, info.ikBackend, info.ikModelPath, info.actionRequestMode, info.chunkrlCheckpoint, robotType, datasetPath, episode, initialFrame]);
 
   const display = useCallback(async (data) => {
     for (const frame of data.frames || []) {
@@ -85,7 +87,7 @@ export default function DatasetSimulationPanel({ enabled, active = true, onEnabl
       onFrame({ ...data, ...frame });
       if (frame.dt_s == null && data.frames.length > 1) await new Promise((resolve) => setTimeout(resolve, 1000 / data.fps));
     }
-    if (mountedRef.current) setStatus(`Episode ${data.episode} · frame ${data.frame}/${data.length - 1}${data.ik_backend ? ' · ' + data.ik_backend : ''}${data.finished ? ' · finished' : ''}`);
+    if (mountedRef.current) setStatus(`Episode ${data.episode} · frame ${data.frame}/${data.length - 1}${data.ik_backend ? ' · ' + data.ik_backend : ''}${data.action_request_mode === 'chunkrl' ? ' · ChunkRL ' + (data.chunkrl_decisions || []).map((d) => `${d.arm}:${d.switched ? 'switch' : 'keep'}@${d.index}`).join(' / ') : ''}${data.finished ? ' · finished' : ''}`);
   }, [onFrame]);
 
   const execute = useCallback((operation) => {

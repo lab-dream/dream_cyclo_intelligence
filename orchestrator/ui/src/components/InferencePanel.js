@@ -46,7 +46,7 @@ import {
 } from '../features/tasks/taskSlice';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
 import { requiresInstruction } from '../constants/policyCapabilities';
-import { getInferenceTaskInfoKey } from '../utils/taskInfoSync';
+import { actionRequestModeOrDefault, getInferenceTaskInfoKey } from '../utils/taskInfoSync';
 import {
   getInferenceTimingWarnings,
   hasIncompleteInferenceTiming,
@@ -75,10 +75,9 @@ const InferencePanel = () => {
     inferenceStatus.inferencePhase === InferencePhase.INFERENCING;
   const inferenceMode = info.inferenceMode || 'simulation';
   const isRobotMode = inferenceMode === 'robot';
-  const actionRequestMode =
-    String(info.actionRequestMode || '').trim().toLowerCase() === 'sync'
-      ? 'sync'
-      : 'async';
+  const actionRequestMode = actionRequestModeOrDefault(info.actionRequestMode);
+  const supportsChunkRL = info.serviceType === 'lerobot' && info.policyType === 'diffusion';
+  const [showChunkrlBrowser, setShowChunkrlBrowser] = useState(false);
   const isGrootModel = info.serviceType === 'groot';
   const isTensorRtEnabled = info.accelerationMode === 'tensorrt_dit';
   const initialPoseSyncEnabled = Boolean(info.initialPoseSync);
@@ -639,19 +638,19 @@ const InferencePanel = () => {
 
       <div className="w-full h-1 my-2 border-t border-gray-300"></div>
 
-      <div className={clsx('flex', 'items-center', 'mb-2.5')}>
-        <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>
+      <div className={clsx('flex mb-2.5', supportsChunkRL ? 'flex-col gap-2' : 'items-center')}>
+        <div className={clsx(supportsChunkRL ? 'text-sm text-gray-600 font-medium' : classLabel, 'flex', 'items-center', 'gap-1')}>
           <Tooltip content="Choose when the next action chunk is requested." position="bottom">
             <MdInfoOutline className="text-gray-400 hover:text-gray-600 cursor-help" size={14} />
           </Tooltip>
           <span>Action Request</span>
         </div>
-        <div className="grid grid-cols-2 gap-1 flex-1 min-w-0">
+        <div className={clsx("grid gap-1 flex-1 min-w-0", supportsChunkRL ? "grid-cols-3" : "grid-cols-2")}>
           <button
             type="button"
             onClick={() => handleChange('actionRequestMode', 'async')}
             disabled={!isEditable}
-            className={actionModeButtonClass(actionRequestMode !== 'sync')}
+            className={actionModeButtonClass(actionRequestMode === 'async')}
             aria-label="Use async action requests"
             title="Async"
           >
@@ -669,8 +668,34 @@ const InferencePanel = () => {
             <MdHourglassEmpty size={16} className="shrink-0" />
             <span className="truncate">Sync</span>
           </button>
+          {supportsChunkRL && (
+            <button type="button" onClick={() => handleChange('actionRequestMode', 'chunkrl')}
+              disabled={!isEditable} className={actionModeButtonClass(actionRequestMode === 'chunkrl')}
+              aria-label="Use ChunkRL action requests" title="Independent left/right arm chunk decisions">
+              <span className="truncate">ChunkRL</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {supportsChunkRL && actionRequestMode === 'chunkrl' && (
+        <div className="mb-3 space-y-2">
+          <label className="block text-xs text-gray-600" htmlFor="chunkrl-checkpoint">ChunkRL checkpoint</label>
+          <div className="flex gap-1">
+            <input id="chunkrl-checkpoint" className={clsx(classTextInput, 'min-w-0 flex-1')}
+              value={info.chunkrlCheckpoint || ''} onChange={(e) => handleChange('chunkrlCheckpoint', e.target.value)}
+              disabled={!isEditable} />
+            <button type="button" onClick={() => setShowChunkrlBrowser(true)} disabled={!isEditable}
+              aria-label="Browse ChunkRL checkpoint"><MdFolderOpen size={20} /></button>
+          </div>
+          <p className="text-xs text-gray-500">Use a relative EEF Diffusion model. Each arm selects its own waypoint; both targets use the selected IK solver.</p>
+          <button type="button" className="text-xs text-blue-600 underline" disabled={!isEditable}
+            onClick={() => {
+              dispatch(setInferenceTaskInfo({ policyPath: '/workspace/model/lerobot/diffusion_task0_relative_482000/pretrained_model', inferenceHz: 30, actionRequestMode: 'chunkrl' }));
+              dispatch(markLocalTaskInfoEdited({ source: 'inference' }));
+            }}>Use local relative Diffusion model</button>
+        </div>
+      )}
 
       <div className={clsx('flex', 'items-center', 'mb-2.5')}>
         <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>
@@ -796,6 +821,11 @@ const InferencePanel = () => {
         defaultPath={policyBrowserPath}
         homePath={DEFAULT_PATHS.POLICY_CHECKPOINTS_PATH}
       />
+      <FileBrowserModal isOpen={showChunkrlBrowser} onClose={() => setShowChunkrlBrowser(false)}
+        onFileSelect={(item) => { handleChange('chunkrlCheckpoint', item.full_path); setShowChunkrlBrowser(false); }}
+        title="Select ChunkRL checkpoint" selectButtonText="Select" allowDirectorySelect={false}
+        allowFileSelect={true} initialPath="/workspace/model/chunkrl" defaultPath="/workspace/model/chunkrl"
+        homePath="/workspace/model" />
       <FileBrowserModal
         isOpen={showIkBrowser}
         onClose={() => setShowIkBrowser(false)}

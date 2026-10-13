@@ -1,0 +1,10 @@
+{
+  "source": "chunk_rl inference-only deployment files",
+  "files_sha256": {
+    "model.py": "c9fd74353c0cf5da623592373013105226ae4d299c2c7322d7643bacc3277a10",
+    "action.py": "0640ce70bcd0ffaec7f2d58790aa5f91f421b5c80c7c16ed4abb2bb84329ec49",
+    "transform.py": "ad9d314dc372a58d848f6b6b17e43d3074cdeebf2ca96036ffe907e246c263a6",
+    "decider_wrapper.py": "b775bd53bff44d103fc277998037598fa265dba36831a6f0171a0b9bee30b4a7"
+  },
+  "note": "Inference-only files copied without changes. Original copyright headers retained. Source tree does not include the LICENSE referenced by its headers."
+}

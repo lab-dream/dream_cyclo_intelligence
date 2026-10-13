@@ -31,6 +31,10 @@ string simulation_config
 # Relative EEF IK: empty/cyclo_control keeps the current solver; nodeik loads a .pt model.
 string ik_backend
 string ik_model_path
+string action_request_mode
+string chunkrl_checkpoint
+# Reset state on start/resume, discarded startup target, or failed request.
+bool reset_policy_state
 ---
 uint64 seq_id
 bool success
