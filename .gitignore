@@ -89,6 +89,7 @@ Thumbs.db
 
 # Local reports and experiments. Keep implementation, runtime configs, and
 # regression tests tracked; put new experiment outputs in these directories.
+/artifacts/
 reports/
 report/
 experiments/
