@@ -11,7 +11,7 @@ import torch
 from robot_client.robot_client import robot_schema
 
 from lerobot_engine.dataset_simulation import DatasetSimulation, configured_initial_state
-from lerobot_engine.preprocessing import PreprocessingMixin
+from lerobot_engine.engine import LeRobotEngine
 from lerobot_engine.io_mapping import IoMappingMixin
 from lerobot_engine.relative_eef import RelativeEEFAdapter
 from lerobot_engine._vendor.dream.relative_eef_pose import RelativeEEFTransform
@@ -82,7 +82,7 @@ def simulation(tmp_path, request):
     adapter.shape_meta = {"obs": {
         f"robot{side}_{key}": {"shape": [width], "type": "low_dim"}
         for side in range(2) for key, width in (("eef_pos", 3), ("eef_rot_axis_angle", 6), ("gripper_width", 1))}}
-    engine = PreprocessingMixin()
+    engine = LeRobotEngine()
     engine._robot = robot
     engine._relative_eef = adapter
     engine._dataset_simulation = robot

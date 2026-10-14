@@ -56,6 +56,26 @@ class IoMappingMixin:
         adapter = self._relative_eef
         if selection == "bimanual_right" and (adapter is None or adapter.ik_backend != "dls"):
             raise ValueError("bimanual_right requires a relative EEF Diffusion checkpoint with DLS IK")
+        if adapter is not None and adapter.ik_backend == "dls" and selection in {"left", "right"}:
+            image_keys = self._policy_image_keys()
+            wrist_keys = (self._camera_policy_key_candidates("cam_left_wrist")
+                          | self._camera_policy_key_candidates("cam_right_wrist"))
+            if len(image_keys) == 1 and image_keys <= wrist_keys:
+                image_key = next(iter(image_keys))
+                if image_key not in self._camera_policy_key_candidates(f"cam_{selection}_wrist"):
+                    raise ValueError(f"arm_selection={selection} requires a {selection}-wrist checkpoint; "
+                                     f"policy expects {image_key}")
+                # The extracted tape datasets store the recorder's rotated native frames.
+                # Keep their pixels even when image_preprocessing.json was not transferred.
+                config = self._policy.config
+                image_shape = tuple(config.input_features[image_key].shape)
+                if image_shape == (3, 424, 240):
+                    resize = getattr(config, "resize_shape", None)
+                    if ((resize is not None and tuple(resize) != image_shape[1:])
+                            or getattr(config, "crop_shape", None) is not None):
+                        raise ValueError("Native wrist DLS inference requires no image resize or crop in the checkpoint")
+                    self._image_preprocessing = {"resize_mode": "native"}
+                    logger.info("Native %s wrist observation: CHW=%s, recorder rotation only", selection, image_shape)
         command_selection = "right" if selection == "bimanual_right" else selection
         keys = list(self._action_keys)
         if not set(keys) & {"arm_left", "arm_right"}:

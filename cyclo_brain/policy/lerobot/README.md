@@ -13,6 +13,16 @@ before changing the selection; the existing Main Runtime creates command
 publishers only for the selected `action_keys`, including initial synchronization
 and pause/stop holds. Model inputs and normalizers keep their training schema.
 
+For **DLS + Left/Right** with a matching single-wrist checkpoint from
+`Task_0_tape_MCAP_lerobot_v30_left_arm_left_wrist` or
+`Task_0_tape_MCAP_lerobot_v30_right_arm_right_wrist`, the `(3, 424, 240)` image
+input automatically uses native mode, even without `image_preprocessing.json`.
+The live stream must be **424 wide × 240 high** before the configured 270°
+rotation, matching the recorder's **240 wide × 424 high** output. No resizing,
+padding, or cropping is allowed; a wrong stream resolution fails observation
+construction, and an opposite-wrist checkpoint fails LOAD. RGB scaling and
+saved normalization still apply. Multi-camera policies retain their image recipe.
+
 For **DLS**, the existing 14-joint bimanual solver is reused. The non-selected
 arm's seven joints are locked at their measured values and its TCP target is
 held at the measured pose. Both-arm selection preserves the original solve.

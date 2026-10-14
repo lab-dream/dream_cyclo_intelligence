@@ -1,19 +1,23 @@
 """DLS through the existing relative EEF adapter and checkpoint gate."""
 
 import json
+import threading
 import unittest
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
 import torch
 
+from lerobot_engine.engine import LeRobotEngine
 from lerobot_engine.relative_eef import RelativeEEFAdapter
 from lerobot_engine.loading import LoadingMixin
 from lerobot_engine.io_mapping import IoMappingMixin
 from lerobot_engine.tests import test_relative_eef as native
-from robot_client.robot_client import robot_schema
+from robot_client import RobotClient
+from robot_client.robot_client import derive_robot_config, robot_schema
 
 
 class DLSRelativeEEFTest(unittest.TestCase):
@@ -129,6 +133,96 @@ class DLSRelativeEEFTest(unittest.TestCase):
             (Path(self.model_dir.name) / "config.json").write_text(json.dumps(config))
             with self.assertRaisesRegex(ValueError, "DLS IK requires a Diffusion"):
                 loader._configure_relative_eef(self.model_dir.name, "ffw_sg2_rev1", request)
+
+    def wrist_engine(self, side):
+        """Exercise the live RobotClient callback without opening robot transport."""
+        section = robot_schema.load_robot_section("ffw_sg2_rev1")
+        robot = RobotClient.__new__(RobotClient)
+        robot._closed = True
+        robot._config = derive_robot_config(section)
+        robot._action_groups = robot_schema.get_action_groups(section)
+        robot._lock = threading.Lock()
+        robot._images = {}
+        robot._image_timestamps = {}
+        robot._joint_positions = {"follower_upper_body": np.array([self.measured[name] for name in self.names])}
+        images = {}
+        source = np.arange(240 * 424 * 3, dtype=np.uint8).reshape(240, 424, 3)
+        for camera_side, rgb in (("left", source), ("right", 255 - source)):
+            camera = f"cam_{camera_side}_wrist"
+            ok, encoded = cv2.imencode(".png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+            self.assertTrue(ok)
+            robot._update_image(camera, SimpleNamespace(data=encoded.tobytes()))
+            images[camera] = rgb
+        key = f"observation.images.rgb.cam_{side}_wrist"
+        engine = LeRobotEngine()
+        engine._robot = robot
+        engine._relative_eef = self.adapter
+        engine._device = torch.device("cpu")
+        engine._policy = SimpleNamespace(config=SimpleNamespace(
+            type="diffusion", n_obs_steps=2, resize_shape=None, crop_shape=None,
+            input_features={"observation.state": SimpleNamespace(shape=(20,)),
+                            key: SimpleNamespace(shape=(3, 424, 240))}))
+        engine._cameras = engine._resolve_camera_mappings(robot.camera_names, {key})
+        engine._image_resize = engine._infer_image_resize(engine._policy)
+        engine._action_keys = list(self.adapter.action_keys)
+        engine._observation_interval_s = 0
+        return engine, key, images
+
+    def test_single_wrist_live_observation_keeps_recorded_pixels_for_each_selected_arm(self):
+        for side in ("left", "right"):
+            with self.subTest(side=side):
+                engine, key, images = self.wrist_engine(side)
+                engine._configure_arm_selection(SimpleNamespace(arm_selection=side))
+                self.assertEqual(engine._image_preprocessing, {"resize_mode": "native"})
+                batch = engine._build_policy_observation("")
+                self.assertEqual(set(batch), {key, "observation.state", "task"})
+                self.assertEqual(batch[key].shape, (1, 2, 3, 424, 240))
+                self.assertEqual(batch["observation.state"].shape, (1, 2, 20))
+                # Recorder's transpose=2: one counter-clockwise turn, no other pixel changes.
+                recorded = np.rot90(images[f"cam_{side}_wrist"], k=1).copy()
+                expected = torch.from_numpy(recorded).permute(2, 0, 1).float() / 255
+                torch.testing.assert_close(batch[key][0], expected.repeat(2, 1, 1, 1), rtol=0, atol=0)
+                self.assertEqual(engine._action_keys, [f"arm_{side}"])
+
+    def test_native_wrist_rejects_wrong_live_resolution_and_missing_selected_camera(self):
+        for side in ("left", "right"):
+            with self.subTest(side=side):
+                engine, _, _ = self.wrist_engine(side)
+                engine._configure_arm_selection(SimpleNamespace(arm_selection=side))
+                camera = f"cam_{side}_wrist"
+                engine._robot._images[camera] = np.zeros((480, 640, 3), dtype=np.uint8)
+                result = engine._build_policy_observation("")
+                self.assertFalse(result["success"])
+                self.assertIn("Native image shape mismatch", result["message"])
+                del engine._robot._images[camera]
+                result = engine._build_policy_observation("")
+                self.assertFalse(result["success"])
+                self.assertIn(f"Missing camera frame: {camera}", result["message"])
+
+    def test_single_wrist_checkpoint_must_match_selected_arm_and_keep_native_encoder(self):
+        for side in ("left", "right"):
+            engine, _, _ = self.wrist_engine(side)
+            other = "right" if side == "left" else "left"
+            with self.subTest(side=side), self.assertRaisesRegex(ValueError, "requires a .*wrist checkpoint"):
+                engine._configure_arm_selection(SimpleNamespace(arm_selection=other))
+            for field, value in (("resize_shape", (256, 256)), ("crop_shape", (200, 200))):
+                engine, _, _ = self.wrist_engine(side)
+                setattr(engine._policy.config, field, value)
+                with self.subTest(side=side, field=field), self.assertRaisesRegex(ValueError, "no image resize or crop"):
+                    engine._configure_arm_selection(SimpleNamespace(arm_selection=side))
+
+    def test_existing_multi_camera_and_bimanual_image_recipes_are_preserved(self):
+        for selection in ("both", "bimanual_right", "left", "right"):
+            with self.subTest(selection=selection):
+                engine, key, _ = self.wrist_engine("right")
+                if selection in {"left", "right"}:
+                    engine._policy.config.input_features["observation.images.rgb.cam_left_wrist"] = (
+                        SimpleNamespace(shape=(3, 256, 256)))
+                    engine._policy.config.input_features[key].shape = (3, 256, 256)
+                recipe = {"resize_mode": "letterbox", "padding_alignment": "center"}
+                engine._image_preprocessing = recipe.copy()
+                engine._configure_arm_selection(SimpleNamespace(arm_selection=selection))
+                self.assertEqual(engine._image_preprocessing, recipe)
 
 
 if __name__ == "__main__":
