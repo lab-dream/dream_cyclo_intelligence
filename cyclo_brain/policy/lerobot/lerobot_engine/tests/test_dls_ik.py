@@ -11,6 +11,7 @@ import torch
 
 from lerobot_engine.relative_eef import RelativeEEFAdapter
 from lerobot_engine.loading import LoadingMixin
+from lerobot_engine.io_mapping import IoMappingMixin
 from lerobot_engine.tests import test_relative_eef as native
 from robot_client.robot_client import robot_schema
 
@@ -77,6 +78,48 @@ class DLSRelativeEEFTest(unittest.TestCase):
         chunk, _ = self.chunk([([5, 0, 0], [0, 0, 0])])
         with self.assertRaisesRegex(ValueError, "DLS IK target did not converge"):
             self.adapter.decode_action(chunk)
+
+    def test_bimanual_right_ignores_left_policy_target_and_selects_right_gripper(self):
+        engine = IoMappingMixin()
+        engine._policy = SimpleNamespace(config=SimpleNamespace(type="diffusion"))
+        engine._robot = self.robot
+        engine._relative_eef = self.adapter
+        engine._action_keys = list(self.adapter.action_keys)
+        engine._configure_arm_selection(SimpleNamespace(arm_selection="bimanual_right"))
+        self.assertEqual(engine._action_keys, ["arm_right"])
+        self.assertEqual(engine._arm_selection, "bimanual_right")
+        self.assertEqual(self.adapter.command_arms, ("right",))
+
+        # The unused left prediction is unreachable; only the right TCP moves.
+        chunk, poses = self.chunk([([5, 0, 0], [-.01, .005, .02]),
+                                  ([5, 0, 0], [-.015, .01, .025])])
+        chunk[:, 19] = .5  # Right gripper in the original 20-D policy output.
+        full = self.adapter.decode_action(chunk)
+        commands = engine._select_action_chunk(full)
+        self.assertEqual(commands.shape, (2, 8))
+        np.testing.assert_allclose(commands[:, 7], .75, atol=1e-6)
+        left = [self.measured[name] for name in self.adapter._arm_names["left"]]
+        np.testing.assert_array_equal(full[:, :7], np.tile(left, (2, 1)))
+        poses[:, 0] = self.anchor[0]
+        self.assert_targets(np.c_[full, np.full(2, self.measured["lift_joint"])], poses)
+
+        # Changing every left action component cannot change a right command.
+        chunk[:, :10] = [10, -10, 10, 0, 1, 0, 0, 0, 1, 1]
+        np.testing.assert_allclose(
+            engine._select_action_chunk(self.adapter.decode_action(chunk)), commands,
+            atol=1e-10,
+        )
+
+    def test_bimanual_right_requires_relative_dls(self):
+        for adapter in (None, SimpleNamespace(ik_backend="nodeik"),
+                        SimpleNamespace(ik_backend="cyclo_control")):
+            with self.subTest(adapter=adapter):
+                engine = IoMappingMixin()
+                engine._policy = SimpleNamespace(config=SimpleNamespace(type="diffusion"))
+                engine._relative_eef = adapter
+                engine._action_keys = ["arm_left", "arm_right"]
+                with self.assertRaisesRegex(ValueError, "bimanual_right requires.*DLS"):
+                    engine._configure_arm_selection(SimpleNamespace(arm_selection="bimanual_right"))
 
     def test_nonrelative_checkpoints_reject_dls(self):
         loader = LoadingMixin()

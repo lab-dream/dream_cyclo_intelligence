@@ -51,16 +51,19 @@ class IoMappingMixin:
         if self._policy.config.type != "diffusion":
             return
         selection = str(getattr(request, "arm_selection", "both") or "right").strip().lower()
-        if selection not in {"both", "left", "right"}:
-            raise ValueError("arm_selection must be both, left, or right")
+        if selection not in {"both", "left", "right", "bimanual_right"}:
+            raise ValueError("arm_selection must be both, left, right, or bimanual_right")
+        adapter = self._relative_eef
+        if selection == "bimanual_right" and (adapter is None or adapter.ik_backend != "dls"):
+            raise ValueError("bimanual_right requires a relative EEF Diffusion checkpoint with DLS IK")
+        command_selection = "right" if selection == "bimanual_right" else selection
         keys = list(self._action_keys)
         if not set(keys) & {"arm_left", "arm_right"}:
             return  # Existing single-arm robot groups do not need projection.
         selected = [key for key in keys if key in (
-            {"arm_left", "arm_right"} if selection == "both" else {f"arm_{selection}"})]
+            {"arm_left", "arm_right"} if command_selection == "both" else {f"arm_{command_selection}"})]
         if not selected:
             raise ValueError(f"Robot has no command group for arm_selection={selection}")
-        adapter = self._relative_eef
         if adapter is not None:
             adapter.command_arms = tuple(key.removeprefix("arm_") for key in selected)
             # Shared-lift IK must publish its lift solution with either arm.

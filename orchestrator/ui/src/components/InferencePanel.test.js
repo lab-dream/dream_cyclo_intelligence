@@ -123,6 +123,19 @@ describe('InferencePanel initial pose sync settings', () => {
     expect(screen.getByLabelText('Inference arms')).toBeDisabled();
   });
 
+  test.each(['simulation', 'robot'])('bimanual right-only selects DLS in %s mode and retains the policy path', (inferenceMode) => {
+    const { store } = renderPanel({ policyType: 'diffusion', inferenceMode });
+    const policyPath = store.getState().tasks.inferenceTaskInfo.policyPath;
+    fireEvent.change(screen.getByLabelText('Inference arms'), { target: { value: 'bimanual_right' } });
+    expect(store.getState().tasks.inferenceTaskInfo).toMatchObject({
+      armSelection: 'bimanual_right', ikBackend: 'dls', inferenceMode, policyPath,
+    });
+    expect(screen.getByLabelText('EEF IK backend')).toHaveValue('dls');
+    expect(screen.getByLabelText('EEF IK backend')).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Inference arms'), { target: { value: 'both' } });
+    expect(screen.getByLabelText('EEF IK backend')).toBeEnabled();
+  });
+
   test('applies the local diffusion checkpoint and syncs its dataset FPS', async () => {
     jest.useFakeTimers();
     const { store, sendRecordCommand } = renderPanel({

@@ -29,7 +29,7 @@ const EMPTY_ROBOT_INFO = {
 function buildEefPosePaths(data, relative) {
   if (!data?.anchor_poses?.length) return [];
   const paths = ['observation', 'action'].flatMap((kind) => (
-    kind === 'action' && ['left', 'right'].includes(data.arm_selection)
+    kind === 'action' && ['left', 'right', 'bimanual_right'].includes(data.arm_selection)
       ? [data.arm_selection === 'left' ? 0 : 1] : [0, 1]
   ).map((side) => {
     const anchor = new THREE.Matrix4().set(...data.anchor_poses[side].flat());

@@ -117,6 +117,12 @@ class ControlLoopSafetyTests(unittest.TestCase):
                 loop.configure(robot_type="ffw", ik_backend="dls", action_keys=keys,
                                publish_to_robot=True)
                 self.assertEqual(factory.call_args.kwargs["command_action_keys"], keys)
+                action = np.arange(8 * len(keys), dtype=np.float64)
+                loop._processor = FakeProcessor(actions=[action])
+                loop._running = True
+                loop.tick()
+                self.assertEqual(robot.commands[-1][1], keys)
+                np.testing.assert_array_equal(robot.commands[-1][0], action)
                 loop._initial_pose_sync_in_progress = True
                 loop.pause()
                 self.assertEqual(robot.holds[-1][0], keys)

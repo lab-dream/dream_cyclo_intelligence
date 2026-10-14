@@ -49,7 +49,7 @@ float64 initial_pose_sync_duration_s
 # Relative EEF IK: cyclo_control (default), nodeik (.pt model), dls (elbow null-space).
 string ik_backend
 string ik_model_path
-# Diffusion command arms: both, left, right. GUI defaults to right.
+# Diffusion command arms: both, left, right, bimanual_right (relative EEF + DLS). GUI defaults to right.
 string arm_selection
 # Per-arm decider checkpoint, used only with action_request_mode=chunkrl.
 string chunkrl_checkpoint

@@ -100,6 +100,18 @@ test('robot deployment cannot load a dataset simulation', () => {
   expect(screen.getByRole('button', { name: 'Load / Reset' })).toBeDisabled();
 });
 
+test('bimanual right-only forwards the existing DLS and arm selection fields', async () => {
+  const { callService, onSessionChange } = setup({ ikBackend: 'dls', armSelection: 'bimanual_right' });
+  fireEvent.change(screen.getByLabelText('Simulation dataset path'), { target: { value: '/workspace/dataset/task' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Load / Reset' }));
+  await waitFor(() => expect(onSessionChange).toHaveBeenCalledWith(true));
+  expect(callService).toHaveBeenCalledWith('/lerobot/engine_command', 'interfaces/srv/EngineCommand', expect.objectContaining({
+    command: 3, model_path: '/models/482000', ik_backend: 'dls',
+    arm_selection: 'bimanual_right',
+  }), 0);
+  expect(callService.mock.calls[0][2].publish_to_robot).toBeFalsy();
+});
+
 test.each(['nodeik', 'dls'])('%s subframes use their control timing and forward the selected control rate', async (ikBackend) => {
   const { callService, onFrame } = setup({ ikBackend, controlHz: 80 });
   fireEvent.change(screen.getByLabelText('Simulation dataset path'), { target: { value: '/workspace/dataset/task' } });

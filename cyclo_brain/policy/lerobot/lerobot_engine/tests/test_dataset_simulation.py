@@ -37,7 +37,7 @@ def test_arm_selection_reuses_action_groups_and_only_updates_selected_feedback(s
     np.testing.assert_array_equal(batch['observation.state'][0,-1].numpy(),expected)
 
 
-@pytest.mark.parametrize('selection,start', [('left',0),('right',8)])
+@pytest.mark.parametrize('selection,start', [('left',0),('right',8),('bimanual_right',8)])
 def test_dls_single_arm_simulation_keeps_other_arm_and_lift_in_all_subframes(simulation, selection, start):
     robot, engine, _ = simulation
     engine._relative_eef.ik_backend = 'dls'

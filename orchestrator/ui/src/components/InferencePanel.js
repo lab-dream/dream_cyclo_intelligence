@@ -108,7 +108,10 @@ const InferencePanel = () => {
       // multi-task language-conditioned policy can be re-conditioned via
       // the "Update Task Instruction" button below.
       if (field !== 'taskInstruction' && !isEditable) return;
-      dispatch(setInferenceTaskInfo({ [field]: value }));
+      dispatch(setInferenceTaskInfo({
+        [field]: value,
+        ...(field === 'armSelection' && value === 'bimanual_right' ? { ikBackend: 'dls' } : {}),
+      }));
       dispatch(markLocalTaskInfoEdited({ source: 'inference' }));
     },
     [isEditable, dispatch]
@@ -573,12 +576,13 @@ const InferencePanel = () => {
               <option value="both">양팔 / Both arms</option>
               <option value="left">왼손 / Left arm</option>
               <option value="right">오른손 / Right arm</option>
+              <option value="bimanual_right">양팔 정책 → 오른손만 (DLS) / Bimanual policy → Right only</option>
             </select>
           </div>
           <div className="flex items-center mb-2.5">
             <label htmlFor="eef-ik-backend" className={classLabel}>EEF IK</label>
             <select id="eef-ik-backend" aria-label="EEF IK backend" className={classTextInput}
-              value={info.ikBackend || 'cyclo_control'} disabled={!isEditable}
+              value={info.ikBackend || 'cyclo_control'} disabled={!isEditable || info.armSelection === 'bimanual_right'}
               onChange={(e) => handleChange('ikBackend', e.target.value)}>
               <option value="cyclo_control">Cyclo Control</option>
               <option value="nodeik">NodeIK</option>
@@ -603,6 +607,7 @@ const InferencePanel = () => {
           )}
           <div className="mb-2.5 text-xs text-gray-500">
             Relative EEF policies use the selected IK in simulation and robot mode.
+            {info.armSelection === 'bimanual_right' && ' Keeps both-arm policy inputs and uses only the right TCP/gripper action. DLS locks the left arm and publishes only the right arm; lift stays fixed.'}
             {info.ikBackend === 'nodeik' && ' Select a run folder for pose/best.pt, or its vision folder for camera-conditioned IK.'}
             {info.ikBackend === 'dls' && ' No IK model needed. Keeps the starting elbow posture while following TCP targets. Requires a relative EEF Diffusion checkpoint.'}
           </div>

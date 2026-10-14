@@ -20,6 +20,26 @@ DLS publishes 16 values for both arms or 8 values for one arm, including the
 corresponding gripper, and never publishes lift. Cyclo Control / NodeIK retain
 their shared-lift command when selecting an arm.
 
+**양팔 정책 → 오른손만 (DLS) / Bimanual policy → Right only** is an additional
+Arms option (`arm_selection=bimanual_right`). It automatically selects DLS and
+requires a 20-dimensional relative EEF Diffusion checkpoint. Keep the trained
+both-arm observation, camera, normalization, and action schema; the existing
+right-arm DLS path ignores the predicted left TCP target, locks the measured
+left joints, and selects only the right seven joints and right gripper for
+publication. Left arm, left gripper, and lift receive no commands. Dataset
+feedback simulation uses the same selection and updates only those eight right
+state values. The original both/left/right options and right default remain.
+
+For the supplied relative `482000` checkpoint, set **Policy Path** to
+`/workspace/model/lerobot/diffusion_task0_relative_482000/pretrained_model` in the
+current container (the transferred copy of
+`/media/son/Remember/AX_Humanoid/checkpoints/diffusion_task0_relative_then_null_20261010_500ep_b64_aug_256_h16_3cam/relative/482000`).
+Select the new Arms option and use **Dataset feedback simulation**, normal
+**Simulation**, or **Robot** mode as before. Unload the current session before
+changing the option. This addition reuses the existing string wire field and
+does not require rebuilding ROS interfaces; rebuild the Web GUI and restart the
+LeRobot runtime to load the updated code.
+
 Dataset feedback also accepts joint-action Diffusion checkpoints. It uses the
 same group selection, feeds only selected predictions into the next joint state,
 and keeps all other state values fixed. DLS still requires a **relative EEF
