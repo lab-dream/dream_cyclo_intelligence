@@ -56,14 +56,26 @@ class ServiceHandler:
             return self._make_response(False, response.message)
 
         action_keys = list(response.action_keys)
+        task_instruction = request.task_instruction or ""
+        try:
+            self._configure_loaded_policy(request, action_keys, task_instruction)
+        except Exception:
+            # A rejected engine result must not leave START enabled. In
+            # particular, an old DLS engine may still advertise a lift action.
+            self._control_loop.deconfigure()
+            self._requester.unload_policy()
+            raise
         self._session.mark_loaded(
             robot_type=request.robot_type,
-            task_instruction=request.task_instruction or "",
+            task_instruction=task_instruction,
             action_keys=action_keys,
         )
+        return self._make_response(True, response.message or "loaded", action_keys)
+
+    def _configure_loaded_policy(self, request, action_keys, task_instruction):
         self._control_loop.configure(
             robot_type=request.robot_type,
-            task_instruction=self._session.task_instruction,
+            task_instruction=task_instruction,
             action_keys=action_keys,
             publish_to_robot=bool(getattr(request, "publish_to_robot", False)),
             action_request_mode=getattr(request, "action_request_mode", "async"),
@@ -76,7 +88,6 @@ class ServiceHandler:
                 float(getattr(request, "initial_pose_sync_duration_s", 0.0)) or 5.0
             ),
         )
-        return self._make_response(True, response.message or "loaded", action_keys)
 
     def _start(self, request):
         if not self._session.loaded:

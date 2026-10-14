@@ -26,8 +26,6 @@ logger = logging.getLogger("lerobot_engine")
 class RelativeEEFAdapter:
     """Keep one measured TCP anchor for the entire observation/action window."""
 
-    action_keys = ["arm_left", "arm_right", "lift"]
-
     def __init__(self, model_path: str, robot: Any, robot_type: str,
                  ik_backend: str = "cyclo_control", ik_model_path: str = "",
                  device: str = "cpu") -> None:
@@ -38,9 +36,12 @@ class RelativeEEFAdapter:
             raise ValueError(
                 "Dream relative EEF checkpoints require robot_type=ffw_sg2_rev1."
             )
-        self.lift_weight = float(os.environ.get("CYCLO_IK_LIFT_WEIGHT", "10.0"))
-        if not np.isfinite(self.lift_weight) or self.lift_weight <= 0:
-            raise ValueError("CYCLO_IK_LIFT_WEIGHT must be positive and finite")
+        self.action_keys = ["arm_left", "arm_right"]
+        if self.ik_backend != "dls":
+            self.action_keys.append("lift")
+            self.lift_weight = float(os.environ.get("CYCLO_IK_LIFT_WEIGHT", "10.0"))
+            if not np.isfinite(self.lift_weight) or self.lift_weight <= 0:
+                raise ValueError("CYCLO_IK_LIFT_WEIGHT must be positive and finite")
         dataset_root = getattr(robot, "dataset_root", None)
         try:
             metadata = self._metadata_dir(Path(model_path))
@@ -105,7 +106,7 @@ class RelativeEEFAdapter:
         )
         if not np.isfinite(self._lift_limits).all() or self._lift_limits[0] >= self._lift_limits[1]:
             raise ValueError("Invalid URDF lift position limits.")
-        if robot._action_groups.get("lift", {}).get("joint_names") != [self._lift_name]:
+        if self.ik_backend != "dls" and robot._action_groups.get("lift", {}).get("joint_names") != [self._lift_name]:
             raise ValueError("Relative EEF lift IK requires a lift action group.")
         for side, names in (
             ("left", cfg.left_arm_joint_names),
@@ -117,25 +118,35 @@ class RelativeEEFAdapter:
                 raise ValueError(
                     f"Unexpected arm_{side} command joint order: {actual}."
                 )
-        # Both TCP targets share one lift in the official Cyclo MoveL QP core.
-        # Revolute joints use radians; the prismatic lift uses meters.
-        active_names = [
-            *self._arm_names["left"], *self._arm_names["right"], self._lift_name
-        ]
+        # DLS reads the measured lift for FK but optimizes only the arm joints.
+        active_names = [*self._arm_names["left"], *self._arm_names["right"]]
+        if self.ik_backend != "dls":
+            active_names.append(self._lift_name)
         self._active_names = active_names
         if self.ik_backend == "dls":
-            sdk_path = Path(os.environ.get("DLS_IK_SDK_PATH", "/opt/cyclo_sdk/dls_ik"))
-            if not sdk_path.is_dir():
-                sdk_path = Path(__file__).resolve().parents[3] / "sdk/dls_ik"
-            if str(sdk_path) not in sys.path:
-                sys.path.insert(0, str(sdk_path))
-            from dls_ik import DLSIK, DLSOptions
+            candidates = [Path(os.environ.get("DLS_IK_SDK_PATH", "/opt/cyclo_sdk/dls_ik"))]
+            candidates.extend(parent / "sdk/dls_ik" for parent in Path(__file__).resolve().parents)
+            for sdk_path in candidates:
+                if (sdk_path / "dls_ik/__init__.py").is_file():
+                    if str(sdk_path) not in sys.path:
+                        sys.path.insert(0, str(sdk_path))
+                    break
+            try:
+                from dls_ik import DLSIK, DLSOptions
+            except ImportError as error:
+                self._urdf_dir.cleanup()
+                raise RuntimeError(
+                    f"DLS IK dependency is unavailable ({error.name}). Mount sdk/dls_ik "
+                    "at /opt/cyclo_sdk/dls_ik (or set DLS_IK_SDK_PATH) and install "
+                    "modern_robotics==1.1.1 in the LeRobot Python environment. "
+                    "Rebuild the LeRobot image to include these dependencies permanently."
+                ) from error
 
             self.kinematics = DLSIK(
                 str(urdf_path), active_names, [cfg.left_ee_frame, cfg.right_ee_frame],
-                options=DLSOptions(lift_weight=self.lift_weight),
+                options=DLSOptions(),
             )
-            logger.info("Relative EEF metadata: %s; IK backend: DLS + elbow null-space", metadata)
+            logger.info("Relative EEF metadata: %s; IK backend: DLS arms only + elbow null-space", metadata)
             return
         if self.ik_backend == "nodeik":
             from .nodeik import NodeIK
@@ -252,7 +263,7 @@ class RelativeEEFAdapter:
         return batch
 
     def decode_action(self, chunk: np.ndarray) -> np.ndarray:
-        """Restore absolute TCP poses and return arms/grippers + shared lift."""
+        """Restore TCP targets; DLS outputs only the arms and two grippers."""
         if chunk.ndim != 2 or chunk.shape[1] != 20 or not np.isfinite(chunk).all():
             raise ValueError(
                 "Expected finite relative EEF actions of shape (time, 20)."
@@ -277,7 +288,8 @@ class RelativeEEFAdapter:
                 command.extend(
                     [*[seed[name] for name in self._arm_names[side]], grippers[waypoint, index]]
                 )
-            command.append(seed[self._lift_name])
+            if self.ik_backend != "dls":
+                command.append(seed[self._lift_name])
             commands.append(command)
         result = np.asarray(commands, dtype=np.float64)
         if not np.isfinite(result).all():
@@ -287,11 +299,12 @@ class RelativeEEFAdapter:
     def _solve_bimanual(
         self, poses: dict[str, np.ndarray], seed: dict[str, float]
     ) -> dict[str, float]:
-        """Solve both targets together, preserving SI units and URDF limits."""
-        lower, upper = self._lift_limits
+        """Solve both targets with the current measured non-active joints."""
         result, position_error, rotation_error = self.kinematics.solve(
             {**self.measured, **seed}, poses["left"], poses["right"]
         )
+        if self.ik_backend == "dls" and set(result) != set(self._active_names):
+            raise ValueError("DLS IK must return exactly the 14 arm joints without lift.")
         if position_error >= 1e-4 or rotation_error >= 1e-3:
             logger.debug("IK residual: position=%.6fm, rotation=%.6frad",
                          position_error, rotation_error)
@@ -302,10 +315,12 @@ class RelativeEEFAdapter:
                     "The action chunk was not accepted."
                 )
         if not np.isfinite(list(result.values())).all():
-            raise ValueError("Shared arm/lift IK produced non-finite joint commands.")
-        if not lower - 1e-8 <= result[self._lift_name] <= upper + 1e-8:
-            raise ValueError("Shared arm/lift IK exceeded the lift joint limits.")
-        result[self._lift_name] = float(np.clip(result[self._lift_name], lower, upper))
+            raise ValueError("IK produced non-finite joint commands.")
+        if self.ik_backend != "dls":
+            lower, upper = self._lift_limits
+            if not lower - 1e-8 <= result[self._lift_name] <= upper + 1e-8:
+                raise ValueError("Shared arm/lift IK exceeded the lift joint limits.")
+            result[self._lift_name] = float(np.clip(result[self._lift_name], lower, upper))
         return result
 
     def close(self) -> None:

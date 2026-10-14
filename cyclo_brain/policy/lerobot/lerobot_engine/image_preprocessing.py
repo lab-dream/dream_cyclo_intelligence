@@ -8,12 +8,36 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 
 
 IMAGE_KEY_PREFIX = "observation.images."
+
+
+def infer_image_preprocessing(model_path: str, policy_type: str) -> dict[str, str]:
+    """Read the transferred Diffusion training image recipe, nearest file first."""
+    if policy_type != "diffusion":
+        return {}
+    root = Path(model_path)
+    for directory in (root, *root.parents):
+        path = directory / "image_preprocessing.json"
+        if not path.is_file():
+            continue
+        metadata = json.loads(path.read_text())
+        recipe = str(metadata.get("image_recipe", "")).lower()
+        if not all(term in recipe for term in (
+            "bilinear", "antialias", "aspect-preserving", "zero padding"
+        )):
+            raise ValueError(f"Unsupported Diffusion image_recipe in {path}: {recipe!r}")
+        alignment = metadata.get("padding_alignment", "center")
+        if alignment not in {"center", "top_left", "bottom_right"}:
+            raise ValueError(f"Unsupported padding_alignment in {path}: {alignment!r}")
+        return {"resize_mode": "letterbox", "padding_alignment": alignment}
+    return {}
 
 
 def infer_image_resize_targets(
@@ -50,13 +74,44 @@ def apply_rotation(image: np.ndarray, rotation_deg: int | float | None) -> np.nd
 def resize_image(
     image: np.ndarray,
     target_size: Optional[Tuple[int, int]],
+    *,
+    resize_mode: str = "stretch",
+    padding_alignment: str = "center",
 ) -> np.ndarray:
-    """Resize to ``(width, height)`` if requested."""
+    """Resize to (width, height), optionally preserving aspect ratio and padding."""
     if not target_size:
         return image
     width, height = target_size
+    if resize_mode == "letterbox" and image.dtype != np.uint8:
+        raise ValueError("Training letterbox requires uint8 RGB images before resize and padding")
     if image.shape[1] == width and image.shape[0] == height:
         return image
+
+    if resize_mode == "letterbox":
+        import torch
+        from torchvision.transforms.v2 import functional as VF
+
+        source_h, source_w = image.shape[:2]
+        scale = min(height / source_h, width / source_w)
+        resized_h = max(1, min(height, round(source_h * scale)))
+        resized_w = max(1, min(width, round(source_w * scale)))
+        # cached_images.py stores resized uint8 frames during training. Use
+        # the same torchvision v2 operation before float conversion/scaling.
+        tensor = torch.from_numpy(np.ascontiguousarray(image)).permute(2, 0, 1)
+        tensor = VF.resize(tensor, [resized_h, resized_w], antialias=True)
+        extra_h, extra_w = height - resized_h, width - resized_w
+        if padding_alignment == "center":
+            top, left = extra_h // 2, extra_w // 2
+        elif padding_alignment == "top_left":
+            top, left = extra_h, extra_w
+        elif padding_alignment == "bottom_right":
+            top, left = 0, 0
+        else:
+            raise ValueError(f"Unsupported padding_alignment: {padding_alignment!r}")
+        tensor = VF.pad(tensor, [left, top, extra_w - left, extra_h - top])
+        return tensor.permute(1, 2, 0).numpy()
+    if resize_mode != "stretch":
+        raise ValueError(f"Unsupported resize_mode: {resize_mode!r}")
 
     import cv2
 
@@ -68,6 +123,9 @@ def prepare_policy_image(
     *,
     rotation_deg: int | float | None = 0,
     target_size: Optional[Tuple[int, int]] = None,
+    resize_mode: str = "stretch",
+    padding_alignment: str = "center",
 ) -> np.ndarray:
     """Rotate first, then resize to the policy feature's expected shape."""
-    return resize_image(apply_rotation(image, rotation_deg), target_size)
+    return resize_image(apply_rotation(image, rotation_deg), target_size,
+                        resize_mode=resize_mode, padding_alignment=padding_alignment)

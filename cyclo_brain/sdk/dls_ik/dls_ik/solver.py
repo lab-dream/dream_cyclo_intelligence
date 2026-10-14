@@ -37,8 +37,6 @@ class DLSOptions:
     position_tolerance: float = 1e-4
     rotation_tolerance: float = 1e-3
     max_joint_step: float = 0.1
-    max_lift_step: float = 0.01
-    lift_weight: float = 10.0
     nullspace_gain: float = 0.15
     elbow_position_weight: float = 4.0
     elbow_angle_weight: float = 1.0
@@ -47,8 +45,7 @@ class DLSOptions:
     posture_iterations: int = 6
 
     def __post_init__(self):
-        positive = ("damping", "position_tolerance", "rotation_tolerance",
-                    "max_joint_step", "max_lift_step", "lift_weight")
+        positive = ("damping", "position_tolerance", "rotation_tolerance", "max_joint_step")
         nonnegative = ("nullspace_gain", "elbow_position_weight",
                        "elbow_angle_weight", "posture_weight", "limit_weight")
         for name in positive + nonnegative:
@@ -62,7 +59,7 @@ class DLSOptions:
 
 
 class DLSIK:
-    """Solve both AI Worker arms and their shared lift as one 12 x 15 task.
+    """Solve the 14 arm joints; keep the measured lift fixed during each solve.
 
     ``solve`` has the same return shape as CycloIK and NodeIK:
     (named active joints, largest TCP position error, largest angle error).
@@ -74,10 +71,13 @@ class DLSIK:
         self.options = options or DLSOptions()
         self.names = list(active_names) if active_names is not None else [
             *(f"arm_l_joint{i}" for i in range(1, 8)),
-            *(f"arm_r_joint{i}" for i in range(1, 8)), "lift_joint",
+            *(f"arm_r_joint{i}" for i in range(1, 8)),
         ]
         if len(set(self.names)) != len(self.names):
             raise ValueError("Duplicate active joint names")
+        arm_names = {f"arm_{side}_joint{i}" for side in ("l", "r") for i in range(1, 8)}
+        if set(self.names) != arm_names:
+            raise ValueError("DLS IK solves only the 14 arm joints; lift_joint must not be active")
         path = Path(urdf_path).expanduser()
         if not path.is_file():
             raise FileNotFoundError(path)
@@ -107,11 +107,7 @@ class DLSIK:
         self.elbow_ids = [self._frame_id(f"arm_{side}_link4") for side in ("l", "r")]
         self.shoulder_ids = [self._frame_id(f"arm_{side}_link1") for side in ("l", "r")]
         self.elbow_indices = [self.names.index(f"arm_{side}_joint4") for side in ("l", "r")]
-        self.lift_index = self.names.index("lift_joint")
-        self.sqrt_weight = np.ones(len(self.names))
-        self.sqrt_weight[self.lift_index] = np.sqrt(self.options.lift_weight)
         self.step_bounds = np.full(len(self.names), self.options.max_joint_step)
-        self.step_bounds[self.lift_index] = self.options.max_lift_step
         self.reference = None
         self.reference_elbows = None
         self.last_diagnostics = {}
@@ -122,7 +118,7 @@ class DLSIK:
         return int(self.model.getFrameId(name))
 
     def _configuration(self, seed):
-        missing = set(self.names) - set(seed)
+        missing = (set(self.names) | {"lift_joint"}) - set(seed)
         if missing:
             raise ValueError(f"Missing seed joints: {sorted(missing)}")
         if not np.isfinite(list(seed.values())).all():
@@ -216,14 +212,14 @@ class DLSIK:
         return trial
 
     def _joint_step(self, Jb, Vb, q, use_posture=True):
-        """Re-solve with outward-moving limit joints held, including lift at 0m."""
+        """Re-solve with outward-moving arm joints at their limits held."""
         opt = self.options
         free = np.ones(len(self.names), dtype=bool)
         th = q[self.q_indices]
-        H_grad = (self._posture_gradient(q) / self.sqrt_weight
+        H_grad = (self._posture_gradient(q)
                   if use_posture else np.zeros(len(self.names)))
         for _ in range(len(self.names) + 1):
-            J = (Jb / self.sqrt_weight)[:, free]
+            J = Jb[:, free]
             primary = np.zeros(len(self.names))
             secondary = np.zeros(len(self.names))
             primary[free] = dls_step(J, Vb, opt.damping)
@@ -232,11 +228,11 @@ class DLSIK:
             # The null-space property is first-order. Shrink its finite step
             # with the task error to prevent persistent second-order drift.
             secondary *= min(1.0, np.linalg.norm(primary) / (np.linalg.norm(secondary) + 1e-12))
-            step = (primary + secondary) / self.sqrt_weight
+            step = primary + secondary
             blocked = free & (((th <= self.lower + 1e-9) & (step < 0))
                               | ((th >= self.upper - 1e-9) & (step > 0)))
             if not np.any(blocked):
-                return primary / self.sqrt_weight, step
+                return primary, step
             free[blocked] = False
         return np.zeros(len(self.names)), np.zeros(len(self.names))
 
@@ -267,11 +263,11 @@ class DLSIK:
             cost = self._posture_cost(q)
             free = np.ones(len(self.names), dtype=bool)
             th = q[self.q_indices]
-            gradient = self._posture_gradient(q) / self.sqrt_weight
+            gradient = self._posture_gradient(q)
             for _ in range(len(self.names) + 1):
                 step = np.zeros(len(self.names))
-                J = (Jb / self.sqrt_weight)[:, free]
-                step[free] = -opt.nullspace_gain * (nullspace_projector(J) @ gradient[free]) / self.sqrt_weight[free]
+                J = Jb[:, free]
+                step[free] = -opt.nullspace_gain * (nullspace_projector(J) @ gradient[free])
                 blocked = free & (((th <= self.lower + 1e-9) & (step < 0))
                                   | ((th >= self.upper - 1e-9) & (step > 0)))
                 if not np.any(blocked):
@@ -317,7 +313,7 @@ class DLSIK:
             if position < opt.position_tolerance and angle < opt.rotation_tolerance:
                 reason = "converged"
                 break
-            # Week 6: DLS primary - k * (N @ H_grad), in weighted coordinates.
+            # Week 6: DLS primary - k * (N @ H_grad), for arm joints only.
             primary, step = self._joint_step(Jb, Vb, q)
             accepted = False
             for scale in (1.0, 0.5, 0.25, 0.125):
@@ -375,7 +371,7 @@ class DLSIK:
             if not self.lower[index] <= elbow_angle <= self.upper[index]:
                 raise ValueError("Initial elbow angle exceeds URDF limits")
             q[self.q_indices[index]] = elbow_angle
-        free = [i for i in range(len(self.names)) if i not in [*self.elbow_indices, self.lift_index]]
+        free = [i for i in range(len(self.names)) if i not in self.elbow_indices]
         # A small symmetric shoulder seed avoids the straight-home singularity.
         for side in ("l", "r"):
             index = self.names.index(f"arm_{side}_joint1")

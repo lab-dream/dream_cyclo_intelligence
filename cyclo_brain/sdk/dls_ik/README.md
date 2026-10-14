@@ -1,6 +1,7 @@
 # AI Worker DLS IK
 
-AI Worker (`ffw_sg2_rev1`)의 양팔과 공용 리프트를 함께 푸는 IK입니다.
+AI Worker (`ffw_sg2_rev1`)의 양팔 14개 관절만 푸는 IK입니다.
+리프트는 키보드로 별도 조작하고, DLS는 측정된 리프트 위치를 FK에만 사용합니다.
 Modern Robotics의 body pose 오차와 DLS·영공간 계산을 작은 Python API로 구성했습니다.
 TCP 위치와 방향을 우선하고, 여유 자유도에서 시작 자세의 팔꿈치 위치와 굽힘을 유지합니다.
 
@@ -14,7 +15,6 @@ ik = DLSIK("ffw_sg2_follower.urdf", options=DLSOptions(
     nullspace_gain=0.15,
     elbow_position_weight=4.0,
     elbow_angle_weight=1.0,
-    lift_weight=10.0,
 ))
 
 # measured: {joint_name: value}. 회전 관절은 rad, 리프트는 m.
@@ -25,9 +25,11 @@ joints, position_error, angle_error = ik.solve(measured, left_tcp, right_tcp)
 print(ik.last_diagnostics)
 ```
 
-`solve()`는 왼팔 7개·오른팔 7개·리프트 1개의 관절값과 최대 위치 오차(m),
+`solve()`는 왼팔 7개·오른팔 7개의 관절값과 최대 위치 오차(m),
 최대 방향 오차(rad)를 반환합니다. 그리퍼는 기존 정책 액션 어댑터에서 처리합니다.
-다음 waypoint에는 직전 해를 seed로 사용합니다. 팔꿈치 기준은 세션 시작 자세로
+seed에는 현재 측정한 `lift_joint`(m)도 반드시 포함합니다. 반환된 팔 관절값을
+측정값에 합쳐 다음 waypoint의 seed로 사용합니다. 리프트는 각 solve 동안 고정됩니다.
+팔꿈치 기준은 세션 시작 자세로
 유지하며, `set_reference()`를 생략하면 첫 solve의 seed를 기준으로 잡습니다.
 새 기준 자세는 `set_reference()`로 지정합니다.
 
@@ -41,7 +43,9 @@ Inference에서 LeRobot의 상대 EEF Diffusion 체크포인트를 선택하고,
 **EEF IK → DLS · Elbow Hold**를 선택합니다. 별도의 IK 체크포인트는 필요 없습니다.
 모델이나 IK 모드를 변경할 때는 기존 세션을 Unload한 뒤 다시 Load합니다.
 
-IK 이후 양팔·리프트·그리퍼 명령은 NodeIK와 동일한 5차 곡선으로 보간합니다.
+IK 이후 양팔·그리퍼 16개 명령은 NodeIK와 동일한 5차 곡선으로 보간합니다.
+출력 그룹은 `arm_left`, `arm_right`뿐이며, 리프트 토픽으로 명령을 보내지 않습니다.
+`CYCLO_IK_LIFT_WEIGHT`는 DLS에 적용되지 않습니다.
 실제 제어의 sync/async 청크와 ChunkRL 단일 waypoint에 적용되며,
 기본 설정인 `POSTPROCESS_ACTIONS=true`에서 **Control Hz**를 따릅니다.
 

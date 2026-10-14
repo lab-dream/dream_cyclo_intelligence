@@ -82,6 +82,7 @@ class PreprocessingMixin:
                     img,
                     rotation_deg=cam_cfg.get("rotation_deg", 0),
                     target_size=self._image_resize.get(policy_key),
+                    **getattr(self, "_image_preprocessing", {}),
                 )
             except Exception as exc:
                 return self._fail(f"Camera preprocessing failed for {cam_name}: {exc}")

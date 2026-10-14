@@ -11,11 +11,26 @@ The engine reads `config.json`: Diffusion checkpoints with `"state": "relative"`
 use the EEF path; `"state": null` or an absent `state` keeps the joint-action path.
 The representation is never inferred from the action dimension.
 
+For transferred Diffusion checkpoints, the engine reads the nearest
+`image_preprocessing.json` in the checkpoint directory or its parents.
+The recorded bilinear antialias / aspect-preserving / zero-padding recipe is
+applied after the configured camera rotation and before the saved normalizer.
+The resize and padding use `torchvision.transforms.v2.functional` on uint8 RGB,
+matching the training run's `cached_images.py`. Only after padding is the image
+converted to float32 and scaled by 1/255; resizing in float first changes the
+cached training pixels' rounding.
+Padding is centered by default; the training record can explicitly set
+`padding_alignment` to `center`, `top_left` (padding above/left), or
+`bottom_right` (padding below/right). Resize dimensions use rounding to the
+nearest pixel, matching the supplied training function's `round()` and centered
+padding. Other policies and models without this record keep their existing image path.
+
 The EEF path reuses UMI's `get_real_umi_obs_dict` and `get_real_umi_action`:
 the latest measured TCP anchors the complete observation/action window,
 positions use meters, and rotations use UMI's row-based rot6d. Dream's copied
 FK and gripper scaling match its training transform. After the saved policy
-postprocessor, UMI restores absolute EE poses. The official Cyclo
+postprocessor, UMI restores absolute EE poses. The following describes the default
+Cyclo Control backend; DLS outputs only arms and grippers, as described below. The official Cyclo
 `AIWorkerMoveLController` core coordinates both arm targets and their shared
 lift joint through a small Python binding. The command groups are `arm_left`, `arm_right`,
 and `lift`: eight values per arm (seven joints plus gripper), followed by one
@@ -146,8 +161,18 @@ normal inference reloads when the IK backend or model changes.
 
 DLS needs no IK checkpoint. It follows the supplied Modern Robotics week 5–6
 DLS and null-space exercises, using elbow position and bend as secondary posture
-objectives. It accepts only relative EEF Diffusion checkpoints. See the
+objectives. It solves only the 14 arm joints and outputs the arms plus grippers
+as 16 values (`arm_left`, `arm_right`), leaving lift commands to keyboard teleop.
+The measured lift position remains part of FK and policy observations.
+It accepts only relative EEF Diffusion checkpoints. See the
 [SDK API and initial pose configuration](../../sdk/dls_ik/README.md).
+The command runtime also rejects a DLS LOAD result containing `lift`, before
+creating command publishers. Its RobotClient creates only the two arm publishers;
+normal commands, initial synchronization and pause/stop holds all use that same
+allowlist, even when no action keys are supplied. A rejected LOAD leaves START
+disabled. Runtime configuration logs include the backend and action keys.
+Restart the policy container after updating Python
+sources; reloading weights alone does not reload already imported code.
 
 NodeIK is an unchanged Git submodule at `cyclo_brain/sdk/nodeik`, pinned to
 `5273c0503bd2176f8a42c50e6e50f83f5103d53f`. The small `lerobot_engine/nodeik.py`
@@ -187,7 +212,7 @@ approximate learned solver and does not receive Cyclo QP refinement.
 
 When **NodeIK** or **DLS · Elbow Hold** is selected, the normal control loop uses quintic joint-space
 interpolation instead of linear interpolation, at the existing **Control Hz**.
-It interpolates both arms, lift, and policy grippers after IK, and uses a
+It interpolates both arms and policy grippers after IK (plus lift for NodeIK), and uses a
 quintic weight for the existing chunk blend. The uploaded `quintic_spline` and
 `quintic_spline_multi` functions (Suhan Park) are copied unchanged into
 `cyclo_brain/sdk/action_chunk_processing/action_chunk_processing/spline.py`;
@@ -254,7 +279,8 @@ API callers select the same behavior with the optional boolean
 `simulation_config.use_initial_frame_state` (omitted means `true`). The response
 reports `initial_state_source` as `dataset_frame` or `configured_initial_state`.
 Afterward, the existing UMI decoder and the selected EEF IK backend produce joint
-commands. Each command replaces the simulated arms, grippers, and lift state;
+commands. Each command replaces the simulated arms and grippers (also lift for
+Cyclo Control and NodeIK; DLS preserves the measured lift);
 the last `n_obs_steps` simulated states feed the next prediction. Head and base
 retain their initial values. Camera images advance one recorded dataset frame
 per applied command. The last frame ends the rollout. This tests state feedback

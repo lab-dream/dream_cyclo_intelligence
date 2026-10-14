@@ -51,11 +51,24 @@ class LoadingMixin:
         ``pretrained_model/`` next to ``training_state/``. Strip that
         wrapper if needed so ``from_pretrained`` finds ``config.json``.
         """
-        root = Path((model_path or "").strip())
+        selected = (model_path or "").strip()
+        if not selected:
+            raise ValueError("Select a LeRobot checkpoint directory containing config.json.")
+        root = Path(selected)
         nested = root / "pretrained_model"
-        if not (root / "config.json").exists() and (nested / "config.json").exists():
+        if not (root / "config.json").is_file() and (nested / "config.json").is_file():
             logger.info("Descending into pretrained_model: %s", nested)
             return str(nested)
+        if root.is_dir() and not (root / "config.json").is_file():
+            candidates = sorted(
+                str(path.parent) for path in root.rglob("config.json")
+                if path.is_file() and path.parent.name == "pretrained_model"
+            )
+            hint = " Available checkpoints: " + "; ".join(candidates[:10]) if candidates else ""
+            raise FileNotFoundError(
+                f"LeRobot config.json not found in {root}. Select a specific checkpoint "
+                f"directory containing config.json, rather than the model collection root.{hint}"
+            )
         return str(root)
 
     @staticmethod

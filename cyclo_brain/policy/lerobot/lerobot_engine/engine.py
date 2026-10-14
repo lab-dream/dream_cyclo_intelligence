@@ -139,6 +139,7 @@ class LeRobotEngine(
         # expected size. If config doesn't expose a target shape for a
         # camera, we leave that image at native resolution.
         self._image_resize: Dict[str, tuple[int, int]] = {}
+        self._image_preprocessing: Dict[str, str] = {}
         self._observation_interval_s = 1.0 / 30.0
 
     # ------------------------------------------------------------------ #
@@ -191,6 +192,10 @@ class LeRobotEngine(
                 self._base_n_action_steps = getattr(policy.config, "n_action_steps", None)
                 self._apply_policy_optimization(model_path, request)
 
+            from .image_preprocessing import infer_image_preprocessing
+            self._image_preprocessing = infer_image_preprocessing(
+                model_path, self._policy.config.type)
+            logger.info("Image preprocessing: %s", self._image_preprocessing or "legacy resize")
             self._teardown_robot()
             dataset_robot = getattr(request, "dataset_robot", None)
             if dataset_robot is None:
@@ -287,6 +292,7 @@ class LeRobotEngine(
         self._loaded_model_path = None
         self._loaded_robot_type = None
         self._image_resize = {}
+        self._image_preprocessing = {}
 
         self._cameras = {}
         self._state_modalities = []

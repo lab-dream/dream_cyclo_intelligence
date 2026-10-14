@@ -179,6 +179,7 @@ class RobotClient:
         domain_id: Optional[int] = None,
         enable_command_publishers: bool = False,
         enable_preview_publisher: bool = False,
+        command_action_keys: Optional[list[str]] = None,
     ):
         section = robot_schema.load_robot_section(robot_type)
         # Phase 4: yaml is VLA-semantic (observation.images / state +
@@ -216,7 +217,17 @@ class RobotClient:
         self._preview_publisher: Optional[ROS2Publisher] = None
         self._command_msg_types: dict[str, str] = {}
         self._command_joint_names: dict[str, list[str]] = {}
-        self._action_keys = sorted(self._action_groups.keys())
+        self._action_keys = (
+            sorted(self._action_groups) if command_action_keys is None
+            else list(command_action_keys)
+        )
+        if command_action_keys is not None and (
+            not self._action_keys or len(set(self._action_keys)) != len(self._action_keys)
+        ):
+            raise ValueError("command_action_keys must be non-empty and unique")
+        unknown = set(self._action_keys) - set(self._action_groups)
+        if unknown:
+            raise ValueError(f"unknown command action keys: {sorted(unknown)}")
         self._cmd_vel_linear_deadband = max(
             0.0,
             _float_env("CMD_VEL_LINEAR_DEADBAND", 0.0),
@@ -597,32 +608,16 @@ class RobotClient:
         Main process control loops use this method. Engine process instances keep
         ``enable_command_publishers=False`` and remain read-only.
         """
-        if not self._command_publishers:
-            raise RuntimeError("RobotClient command publishers are not enabled")
-
-        keys = list(action_keys) if action_keys else self._action_keys
-        values = np.asarray(action, dtype=np.float64).reshape(-1)
-        offset = 0
-        for action_key in keys:
-            publish_key = self._resolve_action_key(action_key)
-            cfg = self._action_groups.get(publish_key)
-            if cfg is None:
-                continue
-            publisher_key = f"leader_{publish_key}"
-            msg_type = cfg["msg_type"]
-            width = 3 if msg_type == "geometry_msgs/msg/Twist" else len(cfg["joint_names"])
-            segment = values[offset:offset + width]
-            offset += width
-
-            publisher = self._command_publishers.get(publisher_key)
-            if publisher is None:
-                continue
+        # Validate the entire command before any group is sent, including the
+        # session's allowed modalities and the exact flat-vector dimension.
+        segments = self._build_action_segments(action, action_keys)
+        for publisher, joint_names, segment, msg_type in segments:
             if msg_type == "geometry_msgs/msg/Twist":
                 self._publish_twist(publisher, segment)
             else:
                 self._publish_joint_trajectory(
                     publisher,
-                    self._command_joint_names.get(publisher_key, []),
+                    joint_names,
                     segment,
                 )
 
@@ -636,7 +631,7 @@ class RobotClient:
         if not self._command_publishers:
             raise RuntimeError("RobotClient command publishers are not enabled")
 
-        keys = list(action_keys) if action_keys else self._action_keys
+        keys = self._validated_command_keys(action_keys)
         for action_key in keys:
             publish_key = self._resolve_action_key(action_key)
             cfg = self._action_groups.get(publish_key)
@@ -714,7 +709,7 @@ class RobotClient:
         if not self._command_publishers:
             raise RuntimeError("RobotClient command publishers are not enabled")
 
-        keys = list(action_keys) if action_keys else self._action_keys
+        keys = self._validated_command_keys(action_keys)
         values = np.asarray(action, dtype=np.float64).reshape(-1)
         if not np.all(np.isfinite(values)):
             raise ValueError("action contains non-finite values")
@@ -758,7 +753,7 @@ class RobotClient:
         self,
         action_keys: Optional[list[str]],
     ) -> list[tuple[ROS2Publisher, list[str], np.ndarray]]:
-        keys = list(action_keys) if action_keys else self._action_keys
+        keys = self._validated_command_keys(action_keys)
         planned = []
         missing = []
         stale = []
@@ -879,6 +874,19 @@ class RobotClient:
         if action_key == "odometry" and "mobile" in self._action_groups:
             return "mobile"
         return action_key
+
+    def _validated_command_keys(self, action_keys: Optional[list[str]]) -> list[str]:
+        keys = list(self._action_keys if action_keys is None else action_keys)
+        resolved = [self._resolve_action_key(key) for key in keys]
+        if not resolved or len(set(resolved)) != len(resolved):
+            raise ValueError("command action keys must be non-empty and unique")
+        unknown = set(resolved) - set(self._action_groups)
+        if unknown:
+            raise ValueError(f"unknown action key: {sorted(unknown)}")
+        disabled = set(resolved) - set(self._action_keys)
+        if disabled:
+            raise ValueError(f"action keys are not enabled for this session: {sorted(disabled)}")
+        return resolved
 
     def _publish_twist(self, publisher: ROS2Publisher, values: np.ndarray) -> None:
         Vector3 = get_message_class("geometry_msgs/msg/Vector3")

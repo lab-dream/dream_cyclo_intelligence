@@ -145,6 +145,12 @@ class ControlLoop:
         initial_pose_sync_duration_s: float = 5.0,
         ik_backend: str = "cyclo_control",
     ) -> None:
+        ik_backend = str(ik_backend or "cyclo_control").strip().lower()
+        if ik_backend == "dls" and list(action_keys or []) != ["arm_left", "arm_right"]:
+            raise ValueError(
+                "DLS requires action_keys=['arm_left', 'arm_right'] and never commands lift. "
+                "Restart the LeRobot container to apply the arms-only engine."
+            )
         duration_s = float(initial_pose_sync_duration_s)
         if not math.isfinite(duration_s) or not 1.0 <= duration_s <= 60.0:
             raise ValueError(
@@ -170,6 +176,7 @@ class ControlLoop:
                 robot_type,
                 enable_command_publishers=True,
                 enable_preview_publisher=True,
+                command_action_keys=action_keys or None,
             )
             self._processor = ActionChunkProcessor(
                 inference_hz=self._inference_hz,
@@ -195,7 +202,8 @@ class ControlLoop:
                 "configured RobotClient command path for %s "
                 "(publish_to_robot=%s action_request_mode=%s "
                 "control_hz=%g inference_hz=%g chunk_align_window_s=%g "
-                "initial_pose_sync=%s initial_pose_sync_duration_s=%g)"
+                "initial_pose_sync=%s initial_pose_sync_duration_s=%g "
+                "ik_backend=%s action_keys=%s)"
                 % (
                     robot_type,
                     self._publish_to_robot,
@@ -205,6 +213,8 @@ class ControlLoop:
                     self._chunk_align_window_s,
                     self._initial_pose_sync_enabled,
                     self._initial_pose_sync_duration_s,
+                    ik_backend,
+                    self._action_keys,
                 )
             )
             logger.info(config_message)
