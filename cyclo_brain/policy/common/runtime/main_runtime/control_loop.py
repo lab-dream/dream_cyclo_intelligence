@@ -178,7 +178,7 @@ class ControlLoop:
                 postprocess=self._postprocess_actions,
                 target_chunk_size=self._target_chunk_size,
                 alignment_mode=self._alignment_mode,
-                interpolation_method="quintic" if ik_backend == "nodeik" else "linear",
+                interpolation_method="quintic" if ik_backend in {"nodeik", "dls"} else "linear",
             )
             self._task_instruction = task_instruction or ""
             self._action_keys = list(action_keys or self._robot.action_keys)

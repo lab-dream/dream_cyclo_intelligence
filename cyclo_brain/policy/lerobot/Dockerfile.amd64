@@ -106,6 +106,10 @@ RUN uv pip install pybind11==2.13.6 cmeel-eigen==3.4.1 cmeel-urdfdom-headers==1.
 COPY --from=cyclo_sdk nodeik /opt/cyclo_sdk/nodeik
 RUN uv pip install --no-deps /opt/cyclo_sdk/nodeik torchdiffeq==0.2.5
 
+# Lecture-style DLS / null-space solver; SDK remains editable through the mount.
+COPY --from=cyclo_sdk dls_ik /opt/cyclo_sdk/dls_ik
+RUN uv pip install --no-deps /opt/cyclo_sdk/dls_ik modern_robotics==1.1.1
+
 # Zenoh + runtime Python deps. zenoh_ros2_sdk / robot_client /
 # action_chunk_processing come in via bind-mount (see docker-compose.yml).
 # IMPORTANT: eclipse-zenoh version MUST match rmw_zenoh_cpp's bundled

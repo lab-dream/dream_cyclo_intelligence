@@ -1,0 +1,115 @@
+{
+  "robot_type": "ffw_sg2_rev1",
+  "source": {
+    "type": "front_of_chest_tcp_floor_camera_pose",
+    "reference_initial_state": "initial_state_first_frame_means.json",
+    "datasets": {
+      "arms": {
+        "dataset_name": "merge_0616_to_0819",
+        "statistic": "mean_first_frame_per_episode",
+        "frame_index": 0,
+        "episode_count": 398
+      },
+      "other": {
+        "dataset_name": "Task_0_tape_MCAP_lerobot_v30",
+        "statistic": "mean_first_frame_per_episode",
+        "frame_index": 0,
+        "episode_count": 100
+      }
+    },
+    "joint_sources": {
+      "arm_l_joint1": "tcp_constraints",
+      "arm_l_joint2": "tcp_constraints",
+      "arm_l_joint3": "tcp_constraints",
+      "arm_l_joint4": "tcp_constraints",
+      "arm_l_joint5": "tcp_constraints",
+      "arm_l_joint6": "tcp_constraints",
+      "arm_l_joint7": "tcp_constraints",
+      "gripper_l_joint1": "other",
+      "arm_r_joint1": "tcp_constraints",
+      "arm_r_joint2": "tcp_constraints",
+      "arm_r_joint3": "tcp_constraints",
+      "arm_r_joint4": "tcp_constraints",
+      "arm_r_joint5": "tcp_constraints",
+      "arm_r_joint6": "tcp_constraints",
+      "arm_r_joint7": "tcp_constraints",
+      "gripper_r_joint1": "other",
+      "head_joint1": "other",
+      "head_joint2": "other",
+      "lift_joint": "other",
+      "linear_x": "other",
+      "linear_y": "other",
+      "angular_z": "other"
+    }
+  },
+  "names": [
+    "arm_l_joint1",
+    "arm_l_joint2",
+    "arm_l_joint3",
+    "arm_l_joint4",
+    "arm_l_joint5",
+    "arm_l_joint6",
+    "arm_l_joint7",
+    "gripper_l_joint1",
+    "arm_r_joint1",
+    "arm_r_joint2",
+    "arm_r_joint3",
+    "arm_r_joint4",
+    "arm_r_joint5",
+    "arm_r_joint6",
+    "arm_r_joint7",
+    "gripper_r_joint1",
+    "head_joint1",
+    "head_joint2",
+    "lift_joint",
+    "linear_x",
+    "linear_y",
+    "angular_z"
+  ],
+  "state": [
+    -1.1920540385668665,
+    0.6336734681800743,
+    -1.3846756190194018,
+    -1.6676668237645853,
+    -0.011804009208459294,
+    1.1847400365039478,
+    -1.2924357678183778,
+    0.21488002814352514,
+    -1.140170105239864,
+    -0.6414515261576315,
+    1.3086582029771772,
+    -1.6706793217786486,
+    0.049142154489429525,
+    1.3275881338009068,
+    1.294447965000105,
+    0.1027306928113103,
+    0.7773294299840927,
+    0.059518454648787154,
+    -0.0017709999965518364,
+    2.1196300860466042e-05,
+    -1.7873305952804007e-07,
+    -2.7743919342777265e-05
+  ],
+  "constraints": {
+    "target_tcp_positions_m": [
+      [
+        0.4856320291832409,
+        0.17355220030191562,
+        1.0845264878214818
+      ],
+      [
+        0.4856320291832409,
+        -0.19497015368571616,
+        1.0845264878214818
+      ]
+    ],
+    "layout": "side_by_side_in_front_of_chest",
+    "separation_axis": "y",
+    "common_x_m": 0.4856320291832409,
+    "common_z_m": 1.0845264878214818,
+    "center_y_m": -0.010708976691900268,
+    "target_distance_m": 0.3685223539876318,
+    "separation_increase_m": 0.15,
+    "camera_forward_axis": "+X in camera_left_link/camera_right_link"
+  }
+}

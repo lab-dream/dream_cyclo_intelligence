@@ -1,0 +1,93 @@
+{
+  "robot_type": "ffw_sg2_rev1",
+  "source": {
+    "statistic": "mean_first_frame_per_episode_by_joint_group",
+    "frame_index": 0,
+    "datasets": {
+      "arms": {
+        "dataset_name": "merge_0616_to_0819",
+        "statistic": "mean_first_frame_per_episode",
+        "frame_index": 0,
+        "episode_count": 398
+      },
+      "other": {
+        "dataset_name": "Task_0_tape_MCAP_lerobot_v30",
+        "statistic": "mean_first_frame_per_episode",
+        "frame_index": 0,
+        "episode_count": 100
+      }
+    },
+    "joint_sources": {
+      "arm_l_joint1": "arms",
+      "arm_l_joint2": "arms",
+      "arm_l_joint3": "arms",
+      "arm_l_joint4": "arms",
+      "arm_l_joint5": "arms",
+      "arm_l_joint6": "arms",
+      "arm_l_joint7": "arms",
+      "gripper_l_joint1": "other",
+      "arm_r_joint1": "arms",
+      "arm_r_joint2": "arms",
+      "arm_r_joint3": "arms",
+      "arm_r_joint4": "arms",
+      "arm_r_joint5": "arms",
+      "arm_r_joint6": "arms",
+      "arm_r_joint7": "arms",
+      "gripper_r_joint1": "other",
+      "head_joint1": "other",
+      "head_joint2": "other",
+      "lift_joint": "other",
+      "linear_x": "other",
+      "linear_y": "other",
+      "angular_z": "other"
+    }
+  },
+  "names": [
+    "arm_l_joint1",
+    "arm_l_joint2",
+    "arm_l_joint3",
+    "arm_l_joint4",
+    "arm_l_joint5",
+    "arm_l_joint6",
+    "arm_l_joint7",
+    "gripper_l_joint1",
+    "arm_r_joint1",
+    "arm_r_joint2",
+    "arm_r_joint3",
+    "arm_r_joint4",
+    "arm_r_joint5",
+    "arm_r_joint6",
+    "arm_r_joint7",
+    "gripper_r_joint1",
+    "head_joint1",
+    "head_joint2",
+    "lift_joint",
+    "linear_x",
+    "linear_y",
+    "angular_z"
+  ],
+  "state": [
+    -1.1359525233385477,
+    0.592363465596084,
+    -1.280604522076234,
+    -1.654713365001295,
+    0.1498645397080705,
+    1.0140708442309394,
+    -1.1975308403971807,
+    0.21488002814352514,
+    -1.1052955485899094,
+    -0.5784534234225974,
+    1.2728404299398164,
+    -1.6484443763991696,
+    -0.03956899002525516,
+    1.099864796627706,
+    1.1958028238322866,
+    0.1027306928113103,
+    0.7773294299840927,
+    0.059518454648787154,
+    -0.0017709999965518364,
+    2.1196300860466042e-05,
+    -1.7873305952804007e-07,
+    -2.7743919342777265e-05
+  ]
+}

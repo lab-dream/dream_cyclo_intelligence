@@ -1,0 +1,81 @@
+/**:
+  arm_l_joint_trajectory_executor:
+    ros__parameters:
+      joint_names:
+        - arm_l_joint1
+        - arm_l_joint2
+        - arm_l_joint3
+        - arm_l_joint4
+        - arm_l_joint5
+        - arm_l_joint6
+        - arm_l_joint7
+        - gripper_l_joint1
+      step_names: [home]
+      home: [-1.1920540386, 0.6336734682, -1.384675619, -1.6676668238, -0.0118040092, 1.1847400365, -1.2924357678, 0.2148800281]
+      duration: 5.0
+      position_tolerance: 0.1
+      velocity_tolerance: 0.01
+      action_topic: '/arm_l_controller/follow_joint_trajectory'
+      joint_states_topic: '/joint_states'
+
+/**:
+  arm_r_joint_trajectory_executor:
+    ros__parameters:
+      joint_names:
+        - arm_r_joint1
+        - arm_r_joint2
+        - arm_r_joint3
+        - arm_r_joint4
+        - arm_r_joint5
+        - arm_r_joint6
+        - arm_r_joint7
+        - gripper_r_joint1
+      step_names: [home]
+      home: [-1.1401701052, -0.6414515262, 1.308658203, -1.6706793218, 0.0491421545, 1.3275881338, 1.294447965, 0.1027306928]
+      duration: 5.0
+      position_tolerance: 0.1
+      velocity_tolerance: 0.01
+      action_topic: '/arm_r_controller/follow_joint_trajectory'
+      joint_states_topic: '/joint_states'
+
+/**:
+  head_joint_trajectory_executor:
+    ros__parameters:
+      joint_names:
+        - head_joint1
+        - head_joint2
+      step_names: [home]
+      home: [0.77732943, 0.0595184546]
+      duration: 5.0
+      position_tolerance: 0.1
+      velocity_tolerance: 0.01
+      action_topic: '/head_controller/follow_joint_trajectory'
+      joint_states_topic: '/joint_states'
+
+/**:
+  lift_joint_trajectory_executor:
+    ros__parameters:
+      joint_names:
+        - lift_joint
+      step_names: [home]
+      home: [-0.001771]
+      duration: 10.0
+      position_tolerance: 0.1
+      velocity_tolerance: 0.01
+      action_topic: '/lift_controller/follow_joint_trajectory'
+      joint_states_topic: '/joint_states'
+
+/**:
+  swerve_steering_joint_trajectory_executor:
+    ros__parameters:
+      joint_names:
+        - left_wheel_steer
+        - right_wheel_steer
+        - rear_wheel_steer
+      step_names: [home]
+      home: [0.0, 0.0, 0.0]
+      duration: 10.0
+      position_tolerance: 0.1
+      velocity_tolerance: 0.01
+      action_topic: '/swerve_steering_initial_position_controller/follow_joint_trajectory'
+      joint_states_topic: '/joint_states'

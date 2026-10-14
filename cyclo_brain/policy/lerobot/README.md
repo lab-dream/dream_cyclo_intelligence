@@ -136,13 +136,18 @@ and request latency depend on the Diffusion checkpoint, IK solver, and hardware;
 Dataset FPS configures trajectory intervals rather than guaranteeing that
 replanning can run at that frequency.
 
-### Select Cyclo Control or NodeIK
+### Select Cyclo Control, NodeIK, or DLS
 
 In **Inference**, choose LeRobot / Diffusion and use **EEF IK** to select
-**Cyclo Control** (default) or **NodeIK**. This applies to relative EEF policies
+**Cyclo Control** (default), **NodeIK**, or **DLS · Elbow Hold**. This applies to relative EEF policies
 in both normal inference and dataset feedback simulation. Joint-action policies
 keep their existing path. Unload dataset simulation before changing the solver;
 normal inference reloads when the IK backend or model changes.
+
+DLS needs no IK checkpoint. It follows the supplied Modern Robotics week 5–6
+DLS and null-space exercises, using elbow position and bend as secondary posture
+objectives. It accepts only relative EEF Diffusion checkpoints. See the
+[SDK API and initial pose configuration](../../sdk/dls_ik/README.md).
 
 NodeIK is an unchanged Git submodule at `cyclo_brain/sdk/nodeik`, pinned to
 `5273c0503bd2176f8a42c50e6e50f83f5103d53f`. The small `lerobot_engine/nodeik.py`
@@ -180,7 +185,7 @@ outputs are clipped to the training URDF limits, then combined with the existing
 policy gripper outputs. FK residuals are measured after clipping. NodeIK is an
 approximate learned solver and does not receive Cyclo QP refinement.
 
-When **NodeIK** is selected, the normal control loop uses quintic joint-space
+When **NodeIK** or **DLS · Elbow Hold** is selected, the normal control loop uses quintic joint-space
 interpolation instead of linear interpolation, at the existing **Control Hz**.
 It interpolates both arms, lift, and policy grippers after IK, and uses a
 quintic weight for the existing chunk blend. The uploaded `quintic_spline` and
@@ -200,11 +205,25 @@ interval at Control Hz and also includes its exact endpoint. At 30 dataset FPS a
 while the dataset frame still advances by eight. Cyclo Control keeps its
 existing interpolation and dataset playback behavior.
 
+DLS uses the same interpolation for sync/async action chunks and the single
+waypoint selected by ChunkRL. The DLS SDK's `solve()` still returns the target
+joint vector; interpolation runs after IK in the command/playback paths.
+
 ### Dataset feedback simulation in Inference
 
 Keep the existing Policy Path, select **Simulation** and the LeRobot backend,
 then enable **Dataset feedback simulation** in the Inference sidebar. Enter a
 LeRobot dataset path, episode, and initial frame, and click **Load / Reset**.
+**Use initial frame state** is checked by default. Uncheck it to start from the
+configured front-of-chest pose: both TCPs share forward x=0.485632m and
+z=1.084526m, with left y=+0.173552m and right y=-0.194970m.
+Their lateral distance is 0.368522m (0.15m more than the reference mean pose), and both wrist
+cameras point vertically down. The 14 arm joints are solved from the previous
+dataset-mean pose; grippers, head, lift and base state retain the first-frame
+means of all 100 episodes of `/workspace/dataset/Task_0_tape_MCAP_lerobot_v30`.
+This option replaces the entire
+initial joint observation history; camera history still uses the selected dataset
+frames. Unload the session before changing the option, then load again.
 Both paths must be accessible inside the LeRobot container (normally under
 `/workspace`). Checkpoint metadata retains the original gripper ranges. If that
 metadata is missing, select the original joint training dataset so the engine
@@ -223,8 +242,17 @@ After updating an existing deployment, rebuild the ROS `interfaces` package
 (including `EngineCommand.srv`) and the UI, then restart the ROS bridge and
 LeRobot runtime so both ends use the updated service definition.
 
-The first observation window comes from the selected episode, ending at the
+The first image observation window comes from the selected episode, ending at the
 initial frame; frames before episode start are padded with its first sample.
+Joint observations use that same dataset window when **Use initial frame state**
+is enabled, or copies of the configured initial pose when it is disabled.
+The engine reads all 22 state values by name from `sdk/dls_ik/config/initial_state.json`,
+including the head, grippers, lift and base state values. The home trajectory YAML
+at `sdk/dls_ik/config/ffw_sg2_follower_initial_positions.yaml` uses the corresponding
+joint values; steering joints retain their prior home values.
+API callers select the same behavior with the optional boolean
+`simulation_config.use_initial_frame_state` (omitted means `true`). The response
+reports `initial_state_source` as `dataset_frame` or `configured_initial_state`.
 Afterward, the existing UMI decoder and the selected EEF IK backend produce joint
 commands. Each command replaces the simulated arms, grippers, and lift state;
 the last `n_obs_steps` simulated states feed the next prediction. Head and base
@@ -359,8 +387,7 @@ cyclo_brain/policy/lerobot/
 ├── entrypoint.sh            # Container entrypoint
 ├── workspace/               # Dataset/Model/Results (gitignore)
 ├── test_executor.py         # Unit tests
-├── README.md                # This document
-└── INTEGRATION_REPORT.md    # Integration detail report
+└── README.md                # This document
 ```
 
 ## Prerequisites

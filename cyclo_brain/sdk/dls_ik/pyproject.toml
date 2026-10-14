@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cyclo-dls-ik"
+version = "0.1.0"
+description = "Lecture-style DLS and null-space IK for ROBOTIS AI Worker"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "pin>=3.0", "modern_robotics==1.1.1", "PyYAML>=6", "scipy>=1.10"]
+
+[tool.setuptools.packages.find]
+include = ["dls_ik*"]

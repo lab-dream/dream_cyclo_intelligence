@@ -90,6 +90,28 @@ describe('InferencePanel initial pose sync settings', () => {
     jest.useRealTimers();
   });
 
+  test('selects DLS for diffusion without requiring an IK checkpoint', async () => {
+    jest.useFakeTimers();
+    const { store, sendRecordCommand } = renderPanel({ inferenceMode: 'simulation', policyType: 'diffusion' });
+    fireEvent.change(screen.getByLabelText('EEF IK backend'), { target: { value: 'dls' } });
+    expect(store.getState().tasks.inferenceTaskInfo.ikBackend).toBe('dls');
+    expect(screen.queryByLabelText('NodeIK model path')).not.toBeInTheDocument();
+    expect(screen.getByText(/Keeps the starting elbow posture/)).toBeInTheDocument();
+    await act(async () => { jest.runOnlyPendingTimers(); });
+    expect(sendRecordCommand).toHaveBeenCalledWith('set_task_info', { autofillEmptyTaskFields: false });
+    jest.useRealTimers();
+  });
+
+  test('does not expose DLS settings for ACT', () => {
+    renderPanel({ policyType: 'act' });
+    expect(screen.queryByLabelText('EEF IK backend')).not.toBeInTheDocument();
+  });
+
+  test('locks DLS selection during inference', () => {
+    renderPanel({ policyType: 'diffusion', inferencePhase: InferencePhase.INFERENCING });
+    expect(screen.getByLabelText('EEF IK backend')).toBeDisabled();
+  });
+
   test('applies the local diffusion checkpoint and syncs its dataset FPS', async () => {
     jest.useFakeTimers();
     const { store, sendRecordCommand } = renderPanel({

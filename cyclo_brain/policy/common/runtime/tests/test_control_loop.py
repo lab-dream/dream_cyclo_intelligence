@@ -158,8 +158,9 @@ class ControlLoopSafetyTests(unittest.TestCase):
         )
         self.assertEqual(loop._tick_period(), 1.0 / processor.output_hz)
 
-    def test_nodeik_selects_quintic_for_the_control_command_path(self) -> None:
-        for backend, expected in (("nodeik", 0.103515625), ("cyclo_control", 0.25)):
+    def test_nodeik_and_dls_select_quintic_for_the_control_command_path(self) -> None:
+        for backend, expected in (("nodeik", 0.103515625), ("dls", 0.103515625),
+                                  ("cyclo_control", 0.25)):
             with self.subTest(backend=backend), mock.patch.object(
                 control_loop_module, "RobotClient", return_value=FakeRobot()
             ):
@@ -169,6 +170,27 @@ class ControlLoopSafetyTests(unittest.TestCase):
                 loop._processor.push_actions(np.array([[0.0], [1.0]]))
                 loop._processor.pop_action()
                 np.testing.assert_allclose(loop._processor.pop_action(), [expected])
+                loop.deconfigure()
+
+    def test_dls_chunkrl_waypoint_uses_quintic_and_reaches_target(self) -> None:
+        with mock.patch.object(control_loop_module, "RobotClient", return_value=FakeRobot()):
+            loop = ControlLoop(requester=object())
+            loop.configure(robot_type="ffw", ik_backend="dls",
+                           inference_hz=1.0, control_hz=4.0)
+            try:
+                start = np.array([-.4, -.2])
+                target = np.array([.6, -.1])
+                loop._processor.push_waypoint(start)
+                while loop._processor.pop_action() is not None:
+                    pass
+                count = loop._processor.push_waypoint(target)
+                outputs = np.array([loop._processor.pop_action() for _ in range(count)])
+                self.assertEqual(count, 4)
+                np.testing.assert_allclose(outputs[0], start + .103515625 * (target - start))
+                np.testing.assert_allclose(outputs[-1], target)
+                self.assertTrue(np.all(outputs >= np.minimum(start, target)))
+                self.assertTrue(np.all(outputs <= np.maximum(start, target)))
+            finally:
                 loop.deconfigure()
 
     def test_configure_invalid_timing_uses_constructor_defaults(self) -> None:

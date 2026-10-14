@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,11 +22,37 @@ from ._vendor.umi.real_inference_util import get_real_umi_action
 from .image_preprocessing import apply_rotation
 
 
+def configured_initial_state(robot_type, names):
+    """Read the configured initial pose by name, including base state values."""
+    if robot_type != "ffw_sg2_rev1":
+        raise ValueError("The configured initial state requires AI Worker ffw_sg2_rev1.")
+    sdk_path = Path(os.environ.get("DLS_IK_SDK_PATH", "/opt/cyclo_sdk/dls_ik"))
+    if not sdk_path.is_dir():
+        sdk_path = Path(__file__).resolve().parents[3] / "sdk/dls_ik"
+    path = sdk_path / "config/initial_state.json"
+    document = json.loads(path.read_text())
+    if document["robot_type"] != robot_type or len(set(document["names"])) != len(document["names"]):
+        raise ValueError("Configured initial state has an invalid robot type or duplicate joint names.")
+    positions = dict(zip(document["names"], document["state"], strict=True))
+    missing = set(names) - positions.keys()
+    if missing:
+        raise ValueError(f"Configured initial state does not define dataset joints: {sorted(missing)}")
+    state = np.asarray([positions[name] for name in names], dtype=np.float32)
+    if not np.isfinite(state).all():
+        raise ValueError("Configured initial state must contain finite joint values.")
+    return state
+
+
 class DatasetSimulation(RobotClient):
     """Reuse RobotClient's named groups without creating any robot transport."""
 
-    def __init__(self, robot_type, dataset_path, episode, frame, n_obs_steps, control_hz=100):
+    def __init__(self, robot_type, dataset_path, episode, frame, n_obs_steps, control_hz=100,
+                 use_initial_frame_state=True):
         self._closed = True  # RobotClient's destructor must not close nonexistent transport.
+        if not isinstance(use_initial_frame_state, bool):
+            raise ValueError("use_initial_frame_state must be a boolean.")
+        self.use_initial_frame_state = use_initial_frame_state
+        self.initial_state_source = "dataset_frame" if use_initial_frame_state else "configured_initial_state"
         self.dataset_root = Path(dataset_path)
         info = json.loads((self.dataset_root / "meta/info.json").read_text())
         if info.get("robot_type") != robot_type:
@@ -49,9 +76,11 @@ class DatasetSimulation(RobotClient):
         self.frame = frame
         self.history = deque(maxlen=n_obs_steps)
         self._samples = {}
+        home = None if use_initial_frame_state else configured_initial_state(robot_type, self.names)
         for index in range(frame - n_obs_steps + 1, frame + 1):
             index = max(0, index)
-            self.history.append((index, self.sample(index)["observation.state"].numpy().copy()))
+            state = self.sample(index)["observation.state"].numpy() if home is None else home
+            self.history.append((index, state.copy()))
         self.current = self.history[-1]
         self.relative_action = None
         self.relative_observation = None
@@ -119,12 +148,13 @@ class DatasetSimulation(RobotClient):
 
     def advance(self, commands, engine):
         frames = []
+        interpolate_q = engine._relative_eef.ik_backend in {"nodeik", "dls"}
         for command in commands[:self.length - 1 - self.frame]:
             names, values = self.build_action_preview(command, engine._action_keys)
             state = self.history[-1][1].copy()
             for name, value in zip(names, values, strict=True):
                 state[self.names.index(name)] = value
-            if engine._relative_eef.ik_backend == "nodeik":
+            if interpolate_q:
                 # Only endpoint states enter policy history; images follow dataset time.
                 duration = 1.0 / self.fps
                 times = np.append(np.arange(1.0 / self.control_hz, duration,
@@ -142,7 +172,7 @@ class DatasetSimulation(RobotClient):
             self.frame += 1
             self.history.append((self.frame, state))
             self.current = self.history[-1]
-            if engine._relative_eef.ik_backend != "nodeik":
+            if not interpolate_q:
                 frames.append(self.frame_state(engine))
         # Keep only the current history's images, not a whole decoded episode.
         keep = {frame for frame, _ in self.history}
@@ -166,7 +196,8 @@ def dataset_simulation_command(engine, request):
         settings = json.loads(request.simulation_config)
         robot = DatasetSimulation(request.robot_type, settings["dataset_path"],
                                   int(settings.get("episode", 0)), int(settings.get("frame", 0)),
-                                  config["n_obs_steps"], settings.get("control_hz", 100))
+                                  config["n_obs_steps"], settings.get("control_hz", 100),
+                                  use_initial_frame_state=settings.get("use_initial_frame_state", True))
         loaded = engine.load_policy(SimpleNamespace(**vars(request), dataset_robot=robot))
         if not loaded["success"]:
             robot.close()
@@ -204,6 +235,8 @@ def dataset_simulation_command(engine, request):
     return {
         "episode": robot.episode, "frame": robot.frame, "length": robot.length,
         "fps": robot.fps, "ik_backend": adapter.ik_backend,
+        "use_initial_frame_state": robot.use_initial_frame_state,
+        "initial_state_source": robot.initial_state_source,
         "action_request_mode": "chunkrl" if getattr(engine, "_chunkrl", None) is not None else str(getattr(request, "action_request_mode", "") or "sync"),
         "chunkrl_decisions": engine._chunkrl.last_decisions if getattr(engine, "_chunkrl", None) is not None else [],
         "finished": robot.frame >= robot.length - 1, "frames": frames,

@@ -46,7 +46,7 @@ string acceleration_engine_path
 bool initial_pose_sync
 float64 initial_pose_sync_duration_s
 
-# Relative EEF IK: empty/cyclo_control keeps the current solver; nodeik loads a .pt model.
+# Relative EEF IK: cyclo_control (default), nodeik (.pt model), dls (elbow null-space).
 string ik_backend
 string ik_model_path
 # Per-arm decider checkpoint, used only with action_request_mode=chunkrl.

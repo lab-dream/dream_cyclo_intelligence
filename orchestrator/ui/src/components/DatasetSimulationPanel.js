@@ -30,6 +30,7 @@ export default function DatasetSimulationPanel({ enabled, active = true, onEnabl
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
   const [episode, setEpisode] = useState(0);
   const [initialFrame, setInitialFrame] = useState(0);
+  const [useInitialFrameState, setUseInitialFrameState] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
@@ -74,11 +75,11 @@ export default function DatasetSimulationPanel({ enabled, active = true, onEnabl
       chunkrl_checkpoint: info.chunkrlCheckpoint || '',
       task_instruction: info.taskInstruction?.[0] || '',
       inference_hz: Number(info.inferenceHz) || 30,
-      simulation_config: JSON.stringify({ dataset_path: datasetPath, episode: Number(episode), frame: Number(initialFrame), control_hz: Number(info.controlHz) || 100 }),
+      simulation_config: JSON.stringify({ dataset_path: datasetPath, episode: Number(episode), frame: Number(initialFrame), control_hz: Number(info.controlHz) || 100, use_initial_frame_state: useInitialFrameState }),
     }, 0);
     if (!response.success) throw new Error(response.message || 'Dataset simulation failed');
     return JSON.parse(response.simulation_state);
-  }, [callService, info.policyPath, info.taskInstruction, info.inferenceHz, info.controlHz, info.ikBackend, info.ikModelPath, info.actionRequestMode, info.chunkrlCheckpoint, robotType, datasetPath, episode, initialFrame]);
+  }, [callService, info.policyPath, info.taskInstruction, info.inferenceHz, info.controlHz, info.ikBackend, info.ikModelPath, info.actionRequestMode, info.chunkrlCheckpoint, robotType, datasetPath, episode, initialFrame, useInitialFrameState]);
 
   const display = useCallback(async (data) => {
     for (const frame of data.frames || []) {
@@ -186,6 +187,16 @@ export default function DatasetSimulationPanel({ enabled, active = true, onEnabl
             <label>Episode<input aria-label="Simulation episode" className={inputClass} type="number" min="0" value={episode} disabled={loaded || busy} onChange={(e) => setEpisode(e.target.value)} /></label>
             <label>Initial frame<input aria-label="Simulation initial frame" className={inputClass} type="number" min="0" value={initialFrame} disabled={loaded || busy} onChange={(e) => setInitialFrame(e.target.value)} /></label>
           </div>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" aria-label="Use initial frame state" checked={useInitialFrameState}
+              disabled={loaded || busy || stopping} onChange={(e) => setUseInitialFrameState(e.target.checked)} />
+            Use initial frame state
+          </label>
+          <p className="text-xs text-gray-500">
+            {useInitialFrameState
+              ? 'Start from the recorded joint state at the initial frame.'
+              : 'Configured pose: both hands are side by side in front of the chest, sharing x/z with 36.85 cm separation along y. Both wrist cameras face the floor. Other state values use the Task 0 first-frame means.'}
+          </p>
           <div className="flex flex-wrap gap-2">
             {[
               ['Load / Reset', load, loaded || busy || !available || !datasetPath || !info.policyPath],
@@ -195,7 +206,7 @@ export default function DatasetSimulationPanel({ enabled, active = true, onEnabl
               ['Unload', unload, !loaded || busy],
             ].map(([label, action, disabled]) => <button key={label} className="rounded bg-indigo-600 px-2 py-1 text-xs text-white disabled:bg-gray-300" disabled={disabled || stopping} onClick={action}>{label}</button>)}
           </div>
-          <p className="text-xs text-gray-500">Initial state: dataset. Next state: predicted IK joints. Images advance with dataset frames. Robot commands are disabled.</p>
+          <p className="text-xs text-gray-500">Next state: predicted IK joints. Camera images always come from the selected dataset frames. Robot commands are disabled.</p>
           {(busy || stopping) && <p role="status">{stopping ? 'Finishing chunk and disabling' : running ? 'Running' : 'Processing'}…</p>}
           {status && <p>{status}</p>}
           {error && <p role="alert" className="text-red-600">{error}</p>}

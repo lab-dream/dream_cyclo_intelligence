@@ -87,6 +87,31 @@ Thumbs.db
 *_TEST_REPORT.md
 *_DESIGN.md
 
+# Local reports and experiments. Keep implementation, runtime configs, and
+# regression tests tracked; put new experiment outputs in these directories.
+reports/
+report/
+experiments/
+experiment/
+benchmarks/
+benchmark_results/
+verification/
+validation_results/
+*_REPORT.*
+*_report.md
+*_report.html
+report_*.md
+report_*.html
+report_*.json
+*_benchmark.json
+*_validation.json
+*.log
+
+# Local report bundles and one-off DLS measurement/rendering scripts.
+/docs/chunkrl_integration/
+/cyclo_brain/sdk/dls_ik/scripts/
+/cyclo_brain/sdk/dls_ik/config/ffw_sg2_follower_90deg_initial_positions.yaml
+
 # ────────────────────────────────────────────────────────────
 # Data / model artifacts
 # ────────────────────────────────────────────────────────────

@@ -97,6 +97,8 @@ const InferenceModelSelector = ({ readonly = false }) => {
       setInferenceTaskInfo({
         serviceType: sel.serviceType,
         policyType: sel.policyType,
+        ...(info.ikBackend === 'dls' && sel.value !== 'lerobot:diffusion'
+          ? { ikBackend: 'cyclo_control' } : {}),
         accelerationMode: sel.serviceType === 'groot'
           ? (info.accelerationMode || 'pytorch')
           : 'pytorch',

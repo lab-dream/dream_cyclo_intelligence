@@ -572,6 +572,7 @@ const InferencePanel = () => {
               onChange={(e) => handleChange('ikBackend', e.target.value)}>
               <option value="cyclo_control">Cyclo Control</option>
               <option value="nodeik">NodeIK</option>
+              <option value="dls">DLS · Elbow Hold</option>
             </select>
           </div>
           {info.ikBackend === 'nodeik' && (
@@ -593,6 +594,7 @@ const InferencePanel = () => {
           <div className="mb-2.5 text-xs text-gray-500">
             Relative EEF policies use the selected IK in simulation and robot mode.
             {info.ikBackend === 'nodeik' && ' Select a run folder for pose/best.pt, or its vision folder for camera-conditioned IK.'}
+            {info.ikBackend === 'dls' && ' No IK model needed. Keeps the starting elbow posture while following TCP targets. Requires a relative EEF Diffusion checkpoint.'}
           </div>
         </>
       )}

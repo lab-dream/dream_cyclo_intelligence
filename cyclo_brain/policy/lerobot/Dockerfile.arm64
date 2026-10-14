@@ -63,6 +63,10 @@ RUN pip install --no-cache-dir pybind11==2.13.6 cmeel-eigen==3.4.1 cmeel-urdfdom
 COPY --from=cyclo_sdk nodeik /opt/cyclo_sdk/nodeik
 RUN uv pip install --no-deps /opt/cyclo_sdk/nodeik torchdiffeq==0.2.5
 
+# Lecture-style DLS / null-space solver; SDK remains editable through the mount.
+COPY --from=cyclo_sdk dls_ik /opt/cyclo_sdk/dls_ik
+RUN pip install --no-cache-dir --no-deps /opt/cyclo_sdk/dls_ik modern_robotics==1.1.1
+
 # Zenoh + runtime deps. SDKs are bind-mounted (see docker-compose.yml).
 RUN pip install --no-cache-dir "eclipse-zenoh>=1.6.0,<1.7.0" "rosbags>=0.11.0" "GitPython>=3.1.18" "json5>=0.9.14" pyyaml scipy \
     && mkdir -p /zenoh_sdk /robot_client_sdk /action_chunk_processing_sdk /orchestrator_config \

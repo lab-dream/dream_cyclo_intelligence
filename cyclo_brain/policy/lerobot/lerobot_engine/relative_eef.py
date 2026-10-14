@@ -32,7 +32,7 @@ class RelativeEEFAdapter:
                  ik_backend: str = "cyclo_control", ik_model_path: str = "",
                  device: str = "cpu") -> None:
         self.ik_backend = str(ik_backend or "cyclo_control").strip().lower()
-        if self.ik_backend not in {"cyclo_control", "nodeik"}:
+        if self.ik_backend not in {"cyclo_control", "nodeik", "dls"}:
             raise ValueError(f"Unsupported IK backend: {self.ik_backend!r}.")
         if robot_type != "ffw_sg2_rev1":
             raise ValueError(
@@ -123,6 +123,20 @@ class RelativeEEFAdapter:
             *self._arm_names["left"], *self._arm_names["right"], self._lift_name
         ]
         self._active_names = active_names
+        if self.ik_backend == "dls":
+            sdk_path = Path(os.environ.get("DLS_IK_SDK_PATH", "/opt/cyclo_sdk/dls_ik"))
+            if not sdk_path.is_dir():
+                sdk_path = Path(__file__).resolve().parents[3] / "sdk/dls_ik"
+            if str(sdk_path) not in sys.path:
+                sys.path.insert(0, str(sdk_path))
+            from dls_ik import DLSIK, DLSOptions
+
+            self.kinematics = DLSIK(
+                str(urdf_path), active_names, [cfg.left_ee_frame, cfg.right_ee_frame],
+                options=DLSOptions(lift_weight=self.lift_weight),
+            )
+            logger.info("Relative EEF metadata: %s; IK backend: DLS + elbow null-space", metadata)
+            return
         if self.ik_backend == "nodeik":
             from .nodeik import NodeIK
 
@@ -281,6 +295,12 @@ class RelativeEEFAdapter:
         if position_error >= 1e-4 or rotation_error >= 1e-3:
             logger.debug("IK residual: position=%.6fm, rotation=%.6frad",
                          position_error, rotation_error)
+            if self.ik_backend == "dls":
+                raise ValueError(
+                    "DLS IK target did not converge: "
+                    f"position={position_error:.6f}m, rotation={rotation_error:.6f}rad. "
+                    "The action chunk was not accepted."
+                )
         if not np.isfinite(list(result.values())).all():
             raise ValueError("Shared arm/lift IK produced non-finite joint commands.")
         if not lower - 1e-8 <= result[self._lift_name] <= upper + 1e-8:

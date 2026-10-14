@@ -131,6 +131,9 @@ class LoadingMixin:
         if not config_path.is_file():
             return
         saved = json.loads(config_path.read_text())
+        ik_backend = str(getattr(request, "ik_backend", "") or "cyclo_control").strip().lower()
+        if ik_backend == "dls" and (saved.get("type") != "diffusion" or saved.get("state") != "relative"):
+            raise ValueError("DLS IK requires a Diffusion checkpoint with state='relative'.")
         if saved.get("type") != "diffusion":
             return
         state = saved.get("state")
