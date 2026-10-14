@@ -12,8 +12,45 @@ from robot_client.robot_client import robot_schema
 
 from lerobot_engine.dataset_simulation import DatasetSimulation, configured_initial_state
 from lerobot_engine.preprocessing import PreprocessingMixin
+from lerobot_engine.io_mapping import IoMappingMixin
 from lerobot_engine.relative_eef import RelativeEEFAdapter
 from lerobot_engine._vendor.dream.relative_eef_pose import RelativeEEFTransform
+
+
+@pytest.mark.parametrize('selection,start,width', [('both',0,16),('left',0,8),('right',8,8)])
+def test_arm_selection_reuses_action_groups_and_only_updates_selected_feedback(simulation, selection, start, width):
+    robot, engine, _ = simulation
+    engine._relative_eef = None
+    engine._state_modalities = ['arm_left','arm_right','head','lift','mobile']
+    engine._policy.config.input_features['observation.state'] = SimpleNamespace(shape=[22])
+    engine._action_keys = list(engine._state_modalities)
+    IoMappingMixin._configure_arm_selection(engine, SimpleNamespace(arm_selection=selection))
+    before = robot.current[1].copy()
+    full = np.full((2,22),.25)
+    commands = IoMappingMixin._select_action_chunk(engine,full)
+    assert commands.shape == (2,width)
+    robot.advance(commands,engine)
+    expected = before.copy();expected[start:start+width] = .25
+    np.testing.assert_array_equal(robot.current[1],expected)
+    batch = engine._build_policy_observation('')
+    assert batch['observation.state'].shape == (1,2,22)
+    np.testing.assert_array_equal(batch['observation.state'][0,-1].numpy(),expected)
+
+
+@pytest.mark.parametrize('selection,start', [('left',0),('right',8)])
+def test_dls_single_arm_simulation_keeps_other_arm_and_lift_in_all_subframes(simulation, selection, start):
+    robot, engine, _ = simulation
+    engine._relative_eef.ik_backend = 'dls'
+    engine._action_keys = ['arm_left','arm_right']
+    IoMappingMixin._configure_arm_selection(engine, SimpleNamespace(arm_selection=selection))
+    before = robot.current[1].copy()
+    full = np.full((2,16),.25)
+    commands = IoMappingMixin._select_action_chunk(engine, full)
+    frames = robot.advance(commands,engine)
+    unchanged = [i for i in range(22) if i not in range(start,start+8)]
+    states = np.array([frame['joint_state']['position'] for frame in frames])
+    np.testing.assert_array_equal(states[:,unchanged],np.tile(before[unchanged],(len(frames),1)))
+    np.testing.assert_allclose(robot.current[1][start:start+8],.25)
 
 
 @pytest.fixture

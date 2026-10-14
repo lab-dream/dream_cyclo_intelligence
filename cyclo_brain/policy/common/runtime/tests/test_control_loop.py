@@ -109,6 +109,19 @@ class SequenceRequester:
 
 
 class ControlLoopSafetyTests(unittest.TestCase):
+    def test_dls_selected_command_groups_are_used_for_publishers_and_sync_hold(self) -> None:
+        for keys in (["arm_left"], ["arm_right"], ["arm_left", "arm_right"]):
+            robot = FakeRobot()
+            with mock.patch.object(control_loop_module, "RobotClient", return_value=robot) as factory:
+                loop = ControlLoop(requester=object())
+                loop.configure(robot_type="ffw", ik_backend="dls", action_keys=keys,
+                               publish_to_robot=True)
+                self.assertEqual(factory.call_args.kwargs["command_action_keys"], keys)
+                loop._initial_pose_sync_in_progress = True
+                loop.pause()
+                self.assertEqual(robot.holds[-1][0], keys)
+                loop.deconfigure()
+
     def _make_loop(self, processor: FakeProcessor, robot: FakeRobot) -> ControlLoop:
         loop = ControlLoop(requester=object())
         loop._running = True
@@ -166,7 +179,8 @@ class ControlLoopSafetyTests(unittest.TestCase):
             ):
                 loop = ControlLoop(requester=object())
                 loop.configure(robot_type="ffw", ik_backend=backend,
-                               inference_hz=1.0, control_hz=4.0)
+                               inference_hz=1.0, control_hz=4.0,
+                               action_keys=["arm_left", "arm_right"])
                 loop._processor.push_actions(np.array([[0.0], [1.0]]))
                 loop._processor.pop_action()
                 np.testing.assert_allclose(loop._processor.pop_action(), [expected])
@@ -176,7 +190,8 @@ class ControlLoopSafetyTests(unittest.TestCase):
         with mock.patch.object(control_loop_module, "RobotClient", return_value=FakeRobot()):
             loop = ControlLoop(requester=object())
             loop.configure(robot_type="ffw", ik_backend="dls",
-                           inference_hz=1.0, control_hz=4.0)
+                           inference_hz=1.0, control_hz=4.0,
+                           action_keys=["arm_left", "arm_right"])
             try:
                 start = np.array([-.4, -.2])
                 target = np.array([.6, -.1])

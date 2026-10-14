@@ -105,11 +105,22 @@ describe('InferencePanel initial pose sync settings', () => {
   test('does not expose DLS settings for ACT', () => {
     renderPanel({ policyType: 'act' });
     expect(screen.queryByLabelText('EEF IK backend')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Inference arms')).not.toBeInTheDocument();
+  });
+
+  test('defaults to right arm and allows both or left without changing output mode', () => {
+    const { store } = renderPanel({ policyType: 'diffusion', inferenceMode: 'simulation' });
+    expect(screen.getByLabelText('Inference arms')).toHaveValue('right');
+    for (const armSelection of ['both', 'left', 'right']) {
+      fireEvent.change(screen.getByLabelText('Inference arms'), { target: { value: armSelection } });
+      expect(store.getState().tasks.inferenceTaskInfo).toMatchObject({ armSelection, inferenceMode: 'simulation' });
+    }
   });
 
   test('locks DLS selection during inference', () => {
     renderPanel({ policyType: 'diffusion', inferencePhase: InferencePhase.INFERENCING });
     expect(screen.getByLabelText('EEF IK backend')).toBeDisabled();
+    expect(screen.getByLabelText('Inference arms')).toBeDisabled();
   });
 
   test('applies the local diffusion checkpoint and syncs its dataset FPS', async () => {

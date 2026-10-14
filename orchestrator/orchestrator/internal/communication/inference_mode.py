@@ -57,6 +57,7 @@ def inference_runtime_signature(
     ik_backend: str = "cyclo_control",
     ik_model_path: str = "",
     chunkrl_checkpoint: str = "",
+    arm_selection: str = "right",
 ) -> tuple:
     """Return the LOAD-only values that determine policy runtime reuse."""
     return (
@@ -72,6 +73,7 @@ def inference_runtime_signature(
         ik_backend or "cyclo_control",
         ik_model_path if ik_backend == "nodeik" else "",
         chunkrl_checkpoint if action_request_mode == "chunkrl" else "",
+        arm_selection or "right",
     )
 
 

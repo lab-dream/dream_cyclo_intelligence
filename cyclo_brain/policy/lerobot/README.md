@@ -6,6 +6,39 @@ LeRobot integration for Cyclo Intelligence. This folder contains the executor an
 
 ## Dream relative EEF Diffusion inference
 
+In **Inference → LeRobot → Diffusion**, **Arms** selects **양팔 / Both arms**,
+**왼손 / Left arm**, or **오른손 / Right arm** (the GUI default). The same LOAD
+setting is sent to normal inference and **Dataset feedback simulation**. Unload
+before changing the selection; the existing Main Runtime creates command
+publishers only for the selected `action_keys`, including initial synchronization
+and pause/stop holds. Model inputs and normalizers keep their training schema.
+
+For **DLS**, the existing 14-joint bimanual solver is reused. The non-selected
+arm's seven joints are locked at their measured values and its TCP target is
+held at the measured pose. Both-arm selection preserves the original solve.
+DLS publishes 16 values for both arms or 8 values for one arm, including the
+corresponding gripper, and never publishes lift. Cyclo Control / NodeIK retain
+their shared-lift command when selecting an arm.
+
+Dataset feedback also accepts joint-action Diffusion checkpoints. It uses the
+same group selection, feeds only selected predictions into the next joint state,
+and keeps all other state values fixed. DLS still requires a **relative EEF
+20-dimensional** checkpoint; a **22-dimensional joint** checkpoint uses the
+existing joint path, without IK. The transferred tape checkpoint is available at
+`/workspace/model/lerobot/diffusion_tape_right_wrist_native/epoch_0200/pretrained_model`
+and its dataset at
+`/workspace/dataset/Task_0_tape_MCAP_lerobot_v30_right_arm_right_wrist`.
+Its explicit native image recipe checks the recorded resolution without resizing;
+only the existing camera rotation, RGB scaling and saved normalization apply.
+Set **Dataset FPS = 30** for this tape checkpoint.
+
+Development uses `cyclo_intelligence` at
+`/root/ros2_ws/src/cyclo_intelligence`. Rebuild `interfaces` and the UI there,
+then restart the orchestrator, ROS bridge and policy runtime before using the
+new `arm_selection` wire field. Existing programmatic requests that omit the
+field in direct engine calls retain the previous both-arm behavior; the GUI and
+new service requests default to right.
+
 Use the existing **Policy Path**, **Dataset FPS**, and Simulation/Robot controls.
 The engine reads `config.json`: Diffusion checkpoints with `"state": "relative"`
 use the EEF path; `"state": null` or an absent `state` keeps the joint-action path.
@@ -162,12 +195,12 @@ normal inference reloads when the IK backend or model changes.
 DLS needs no IK checkpoint. It follows the supplied Modern Robotics week 5–6
 DLS and null-space exercises, using elbow position and bend as secondary posture
 objectives. It solves only the 14 arm joints and outputs the arms plus grippers
-as 16 values (`arm_left`, `arm_right`), leaving lift commands to keyboard teleop.
+as 16 values for both arms or 8 for the selected arm, leaving lift commands to keyboard teleop.
 The measured lift position remains part of FK and policy observations.
 It accepts only relative EEF Diffusion checkpoints. See the
 [SDK API and initial pose configuration](../../sdk/dls_ik/README.md).
-The command runtime also rejects a DLS LOAD result containing `lift`, before
-creating command publishers. Its RobotClient creates only the two arm publishers;
+The command runtime rejects a DLS LOAD result containing `lift`, before
+creating command publishers. Its RobotClient creates only the selected arm publishers;
 normal commands, initial synchronization and pause/stop holds all use that same
 allowlist, even when no action keys are supplied. A rejected LOAD leaves START
 disabled. Runtime configuration logs include the backend and action keys.

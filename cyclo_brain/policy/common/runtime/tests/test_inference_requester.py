@@ -66,6 +66,7 @@ class InferenceRequesterTests(unittest.TestCase):
             "acceleration_engine_path": "/models/policy/dit_model_bf16.trt",
             "ik_backend": "nodeik",
             "ik_model_path": "/models/nodeik/pose",
+            "arm_selection": "left",
         })())
 
         self.assertEqual(client.calls[0][1], 7200.0)
@@ -74,6 +75,7 @@ class InferenceRequesterTests(unittest.TestCase):
         wire_request = type("Message", (), request_to_message_kwargs(request))()
         self.assertEqual(request_from_message(wire_request).inference_hz, 30)
         self.assertEqual(request_from_message(wire_request).ik_backend, "nodeik")
+        self.assertEqual(request_from_message(wire_request).arm_selection, "left")
         self.assertEqual(request_from_message(wire_request).ik_model_path, "/models/nodeik/pose")
         self.assertEqual(client.calls[0][0].acceleration_mode, "tensorrt_dit")
         self.assertEqual(

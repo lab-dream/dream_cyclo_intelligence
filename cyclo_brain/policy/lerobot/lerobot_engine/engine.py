@@ -207,6 +207,7 @@ class LeRobotEngine(
             self._configure_relative_eef(model_path, robot_type, request)
             from .chunkrl import configure_chunkrl
             configure_chunkrl(self, request)
+            self._configure_arm_selection(request)
             self._dataset_simulation = dataset_robot
 
             return {
@@ -249,6 +250,7 @@ class LeRobotEngine(
                 self._dataset_simulation.relative_action = chunk.copy()
             if self._relative_eef is not None:
                 chunk = self._relative_eef.decode_action(chunk)
+            chunk = self._select_action_chunk(chunk)
             T, D = chunk.shape
             logger.info("Action chunk: T=%d, D=%d", T, D)
             return {
@@ -286,6 +288,8 @@ class LeRobotEngine(
         self._policy = None
         self._chunkrl = None
         self._base_n_action_steps = None
+        self._action_indices = None
+        self._arm_selection = "both"
         self._preprocessor = None
         self._postprocessor = None
         self._device = None

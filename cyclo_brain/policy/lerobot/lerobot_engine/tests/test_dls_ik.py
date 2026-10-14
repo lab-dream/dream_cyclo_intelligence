@@ -49,13 +49,29 @@ class DLSRelativeEEFTest(unittest.TestCase):
         chunk, poses = self.chunk([([.01, 0, .01], [-.01, .005, .02]),
                                   ([.015, 0, .015], [-.015, .01, .025])])
         commands = self.adapter.decode_action(chunk)
-        self.assertEqual(commands.shape, (2, 17))
-        self.assert_targets(commands, poses)
+        self.assertEqual(commands.shape, (2, 16))
+        self.assert_targets(np.c_[commands, np.full(len(commands), self.measured['lift_joint'])], poses)
         np.testing.assert_allclose(commands[:, [7, 15]], [[.3, .4], [.3, .4]], atol=1e-6)
         self.assertEqual(self.adapter.kinematics.names, self.adapter._active_names)
         reference = self.adapter.kinematics.reference.copy()
         self.adapter.decode_action(chunk)
         np.testing.assert_array_equal(reference, self.adapter.kinematics.reference)
+
+    def test_selected_arm_reuses_dls_and_locks_the_other_arm(self):
+        for side, index in (("left", 0), ("right", 1)):
+            with self.subTest(side=side):
+                self.adapter.command_arms = (side,)
+                offsets = [[5, 0, 0], [5, 0, 0]]
+                offsets[index] = [.01, 0, .01]
+                chunk, poses = self.chunk([offsets, offsets])
+                commands = self.adapter.decode_action(chunk)
+                other = 1 - index
+                names = self.adapter._arm_names['right' if side == 'left' else 'left']
+                np.testing.assert_array_equal(commands[:, other*8:other*8+7],
+                    np.tile([self.measured[name] for name in names], (2, 1)))
+                poses[:, other] = self.anchor[other]
+                self.assert_targets(np.c_[commands, np.full(len(commands), self.measured['lift_joint'])], poses)
+                self.assertTrue(self.adapter.kinematics._free_joints.all())
 
     def test_unreachable_chunk_is_not_accepted(self):
         chunk, _ = self.chunk([([5, 0, 0], [0, 0, 0])])

@@ -207,6 +207,7 @@ class OrchestratorNode(Node):
         self._loaded_inference_ik_model_path: str = ''
         self._loaded_inference_action_request_mode: str = 'async'
         self._loaded_inference_chunkrl_checkpoint: str = ''
+        self._loaded_inference_arm_selection: str = 'right'
         self._loaded_inference_control_hz: int = 100
         self._loaded_inference_inference_hz: int = 15
         self._loaded_inference_chunk_align_window_s: float = 0.3
@@ -416,6 +417,7 @@ class OrchestratorNode(Node):
             'acceleration_engine_path',
             'ik_backend',
             'ik_model_path',
+            'arm_selection',
             'chunkrl_checkpoint',
             'initial_pose_sync',
             'initial_pose_sync_duration_s',
@@ -1478,6 +1480,7 @@ class OrchestratorNode(Node):
                     self._acceleration_from_task_info(task_info)
                 )
                 requested_ik_backend = str(getattr(task_info, "ik_backend", "") or "cyclo_control")
+                requested_arm_selection = str(getattr(task_info, "arm_selection", "") or "right")
                 requested_ik_model_path = str(getattr(task_info, "ik_model_path", "") or "").strip()
                 requested_chunkrl_checkpoint = str(getattr(task_info, "chunkrl_checkpoint", "") or "").strip()
                 requested_action_request_mode = (
@@ -1551,6 +1554,7 @@ class OrchestratorNode(Node):
                         loaded_initial_pose_sync_duration_s,
                         loaded_ik_backend, loaded_ik_model_path,
                         getattr(self, "_loaded_inference_chunkrl_checkpoint", ""),
+                        getattr(self, "_loaded_inference_arm_selection", "right"),
                     )
                     requested_signature = inference_runtime_signature(
                         requested_policy_path,
@@ -1564,6 +1568,7 @@ class OrchestratorNode(Node):
                         requested_initial_pose_sync_duration_s,
                         requested_ik_backend, requested_ik_model_path,
                         requested_chunkrl_checkpoint,
+                        requested_arm_selection,
                     )
                     if (
                         requested_policy_path
@@ -1700,6 +1705,7 @@ class OrchestratorNode(Node):
                                         requested_acceleration_engine_path
                                     ),
                                     ik_backend=requested_ik_backend,
+                                    arm_selection=requested_arm_selection,
                                     ik_model_path=requested_ik_model_path,
                                     chunkrl_checkpoint=requested_chunkrl_checkpoint,
                                     action_request_mode=requested_action_request_mode,
@@ -1807,6 +1813,7 @@ class OrchestratorNode(Node):
                                     self._loaded_inference_ik_backend = requested_ik_backend
                                     self._loaded_inference_ik_model_path = requested_ik_model_path
                                     self._loaded_inference_chunkrl_checkpoint = requested_chunkrl_checkpoint
+                                    self._loaded_inference_arm_selection = requested_arm_selection
                                     self._loaded_inference_action_request_mode = (
                                         requested_action_request_mode
                                     )
@@ -2919,6 +2926,7 @@ class OrchestratorNode(Node):
             self._loaded_inference_ik_model_path = ''
             self._loaded_inference_action_request_mode = 'async'
             self._loaded_inference_chunkrl_checkpoint = ''
+            self._loaded_inference_arm_selection = 'right'
             self._loaded_inference_control_hz = 100
             self._loaded_inference_inference_hz = 15
             self._loaded_inference_chunk_align_window_s = 0.3
@@ -3016,6 +3024,7 @@ class OrchestratorNode(Node):
             self._loaded_inference_ik_model_path = ''
             self._loaded_inference_action_request_mode = 'async'
             self._loaded_inference_chunkrl_checkpoint = ''
+            self._loaded_inference_arm_selection = 'right'
             self._loaded_inference_control_hz = 100
             self._loaded_inference_inference_hz = 15
             self._loaded_inference_chunk_align_window_s = 0.3

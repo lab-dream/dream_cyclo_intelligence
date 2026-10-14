@@ -70,6 +70,7 @@ export default function DatasetSimulationPanel({ enabled, active = true, onEnabl
       model_path: info.policyPath || '',
       robot_type: robotType,
       ik_backend: info.ikBackend || 'cyclo_control',
+      arm_selection: info.armSelection || 'right',
       ik_model_path: info.ikModelPath || '',
       action_request_mode: info.actionRequestMode || 'async',
       chunkrl_checkpoint: info.chunkrlCheckpoint || '',
@@ -79,7 +80,7 @@ export default function DatasetSimulationPanel({ enabled, active = true, onEnabl
     }, 0);
     if (!response.success) throw new Error(response.message || 'Dataset simulation failed');
     return JSON.parse(response.simulation_state);
-  }, [callService, info.policyPath, info.taskInstruction, info.inferenceHz, info.controlHz, info.ikBackend, info.ikModelPath, info.actionRequestMode, info.chunkrlCheckpoint, robotType, datasetPath, episode, initialFrame, useInitialFrameState]);
+  }, [callService, info.policyPath, info.taskInstruction, info.inferenceHz, info.controlHz, info.ikBackend, info.ikModelPath, info.armSelection, info.actionRequestMode, info.chunkrlCheckpoint, robotType, datasetPath, episode, initialFrame, useInitialFrameState]);
 
   const display = useCallback(async (data) => {
     for (const frame of data.frames || []) {
@@ -206,7 +207,7 @@ export default function DatasetSimulationPanel({ enabled, active = true, onEnabl
               ['Unload', unload, !loaded || busy],
             ].map(([label, action, disabled]) => <button key={label} className="rounded bg-indigo-600 px-2 py-1 text-xs text-white disabled:bg-gray-300" disabled={disabled || stopping} onClick={action}>{label}</button>)}
           </div>
-          <p className="text-xs text-gray-500">Next state: predicted IK joints. Camera images always come from the selected dataset frames. Robot commands are disabled.</p>
+          <p className="text-xs text-gray-500">Next state: selected arms' predicted joints. Other joints remain fixed. Camera images come from the selected dataset frames. Robot commands are disabled.</p>
           {(busy || stopping) && <p role="status">{stopping ? 'Finishing chunk and disabling' : running ? 'Running' : 'Processing'}…</p>}
           {status && <p>{status}</p>}
           {error && <p role="alert" className="text-red-600">{error}</p>}

@@ -277,11 +277,18 @@ class RelativeEEFAdapter:
         grippers = denormalize(np.clip(action[:, [6, 13]], -1, 1), lower, upper)
         commands = []
         seed = {name: self.measured[name] for name in self._active_names}
+        inactive = set(("left", "right")) - set(getattr(self, "command_arms", ("left", "right")))
+        held_poses = {}
+        if inactive:
+            current_poses = self.transform.poses(
+                np.array([self.measured.get(name, 0.0) for name in self.names]), OBS_STATE)[0]
+            held_poses = {side: current_poses[index] for index, side in enumerate(("left", "right")) if side in inactive}
         for waypoint in range(len(action)):
             poses = {
                 side: pose_to_mat(action[waypoint, index * 7 : index * 7 + 6])
                 for index, side in enumerate(("left", "right"))
             }
+            poses.update(held_poses)
             seed = self._solve_bimanual(poses, seed)
             command = []
             for index, side in enumerate(("left", "right")):
@@ -300,8 +307,13 @@ class RelativeEEFAdapter:
         self, poses: dict[str, np.ndarray], seed: dict[str, float]
     ) -> dict[str, float]:
         """Solve both targets with the current measured non-active joints."""
+        options = {}
+        if self.ik_backend == "dls":
+            inactive = set(("left", "right")) - set(getattr(self, "command_arms", ("left", "right")))
+            if inactive:
+                options["locked_joint_names"] = [name for side in inactive for name in self._arm_names[side]]
         result, position_error, rotation_error = self.kinematics.solve(
-            {**self.measured, **seed}, poses["left"], poses["right"]
+            {**self.measured, **seed}, poses["left"], poses["right"], **options
         )
         if self.ik_backend == "dls" and set(result) != set(self._active_names):
             raise ValueError("DLS IK must return exactly the 14 arm joints without lift.")

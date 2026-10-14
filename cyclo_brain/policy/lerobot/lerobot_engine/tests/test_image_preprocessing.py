@@ -41,6 +41,15 @@ class ImagePreprocessingTest(unittest.TestCase):
 
         self.assertEqual(rotated.shape, (640, 480, 3))
 
+    def test_native_recipe_keeps_rotated_pixels_and_rejects_wrong_resolution(self):
+        image = np.arange(240*424*3,dtype=np.uint8).reshape(240,424,3)
+        result = image_preprocessing.prepare_policy_image(
+            image,rotation_deg=270,target_size=(240,424),resize_mode='native')
+        np.testing.assert_array_equal(result,np.rot90(image,k=1))
+        with self.assertRaisesRegex(ValueError,'Native image shape mismatch'):
+            image_preprocessing.prepare_policy_image(
+                np.zeros((480,640,3),np.uint8),target_size=(240,424),resize_mode='native')
+
 
 if __name__ == "__main__":
     unittest.main()

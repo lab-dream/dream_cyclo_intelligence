@@ -113,6 +113,11 @@ class DatasetSimulation(RobotClient):
     def wait_for_ready(self, timeout=10.0):
         return True
 
+    def get_odom(self):
+        measured = dict(zip(self.names, self.current[1], strict=True))
+        return {"linear_velocity": np.array([measured["linear_x"], measured["linear_y"], 0.]),
+                "angular_velocity": np.array([0., 0., measured["angular_z"]])}
+
     def close(self):
         getattr(self, "_samples", {}).clear()
 
@@ -129,8 +134,9 @@ class DatasetSimulation(RobotClient):
         batch = dict(observations[-1])
         for key in engine._policy.config.input_features:
             batch[key] = torch.stack([obs[key] for obs in observations], dim=1)
-        batch = engine._relative_eef.encode_observation(batch)
-        self.relative_observation = batch["observation.state"][0].detach().cpu().numpy().copy()
+        if engine._relative_eef is not None:
+            batch = engine._relative_eef.encode_observation(batch)
+            self.relative_observation = batch["observation.state"][0].detach().cpu().numpy().copy()
         return batch
 
     def frame_state(self, engine):
@@ -148,7 +154,7 @@ class DatasetSimulation(RobotClient):
 
     def advance(self, commands, engine):
         frames = []
-        interpolate_q = engine._relative_eef.ik_backend in {"nodeik", "dls"}
+        interpolate_q = engine._relative_eef is not None and engine._relative_eef.ik_backend in {"nodeik", "dls"}
         for command in commands[:self.length - 1 - self.frame]:
             names, values = self.build_action_preview(command, engine._action_keys)
             state = self.history[-1][1].copy()
@@ -191,8 +197,8 @@ def dataset_simulation_command(engine, request):
             raise RuntimeError("Unload the current inference session before loading dataset simulation.")
         model = Path(engine._resolve_model_dir(request.model_path))
         config = json.loads((model / "config.json").read_text())
-        if config.get("type") != "diffusion" or config.get("state") != "relative":
-            raise ValueError("Dataset simulation requires a relative EEF Diffusion policy.")
+        if config.get("type") != "diffusion":
+            raise ValueError("Dataset simulation requires a Diffusion policy.")
         settings = json.loads(request.simulation_config)
         robot = DatasetSimulation(request.robot_type, settings["dataset_path"],
                                   int(settings.get("episode", 0)), int(settings.get("frame", 0)),
@@ -227,23 +233,26 @@ def dataset_simulation_command(engine, request):
     adapter = engine._relative_eef
     # Both histories use the same most recent observed TCP anchor as UMI decoding.
     anchors = []
-    for side in range(2):
+    for side in range(2) if adapter is not None else ():
         pose = np.concatenate([adapter.env_obs[f"robot{side}_eef_pos"][-1],
                                adapter.env_obs[f"robot{side}_eef_rot_axis_angle"][-1]])
         anchors.append(pose_to_mat(pose).tolist())
-    relative_action = robot.relative_action if request.command == 4 else None
+    relative_action = robot.relative_action if request.command == 4 and adapter is not None else None
+    relative_observation = robot.relative_observation if adapter is not None else None
     return {
         "episode": robot.episode, "frame": robot.frame, "length": robot.length,
-        "fps": robot.fps, "ik_backend": adapter.ik_backend,
+        "fps": robot.fps, "ik_backend": adapter.ik_backend if adapter is not None else "",
+        "arm_selection": getattr(engine, "_arm_selection", "both"),
+        "action_keys": list(engine._action_keys),
         "use_initial_frame_state": robot.use_initial_frame_state,
         "initial_state_source": robot.initial_state_source,
         "action_request_mode": "chunkrl" if getattr(engine, "_chunkrl", None) is not None else str(getattr(request, "action_request_mode", "") or "sync"),
         "chunkrl_decisions": engine._chunkrl.last_decisions if getattr(engine, "_chunkrl", None) is not None else [],
         "finished": robot.frame >= robot.length - 1, "frames": frames,
-        "observation_relative": robot.relative_observation.tolist(),
+        "observation_relative": relative_observation.tolist() if relative_observation is not None else [],
         "action_relative": relative_action.tolist() if relative_action is not None else [],
-        "observation_poses": get_real_umi_action(robot.relative_observation, adapter.env_obs,
-                                                action_pose_repr="relative").tolist(),
+        "observation_poses": get_real_umi_action(relative_observation, adapter.env_obs,
+                                                action_pose_repr="relative").tolist() if adapter is not None else [],
         "action_poses": get_real_umi_action(relative_action, adapter.env_obs,
                                            action_pose_repr="relative").tolist() if relative_action is not None else [],
         "anchor_poses": anchors, "hardware_publish": False,

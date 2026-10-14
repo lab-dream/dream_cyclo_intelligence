@@ -55,13 +55,14 @@ test('turning off during a running chunk waits, unloads, and restores the normal
 });
 
 test('load uses existing policy path; chunk playback displays every IK state and then unloads', async () => {
-  const { callService, onFrame, onSessionChange } = setup({ ikBackend: 'nodeik', ikModelPath: '/models/nodeik/pose' });
+  const { callService, onFrame, onSessionChange } = setup({ ikBackend: 'nodeik', ikModelPath: '/models/nodeik/pose', armSelection: 'left' });
   fireEvent.change(screen.getByLabelText('Simulation dataset path'), { target: { value: '/workspace/dataset/task' } });
   fireEvent.click(screen.getByRole('button', { name: 'Load / Reset' }));
   await waitFor(() => expect(onSessionChange).toHaveBeenCalledWith(true));
   expect(callService).toHaveBeenCalledWith('/lerobot/engine_command', 'interfaces/srv/EngineCommand', expect.objectContaining({
     command: 3, model_path: '/models/482000', robot_type: 'ffw_sg2_rev1',
     ik_backend: 'nodeik', ik_model_path: '/models/nodeik/pose',
+    arm_selection: 'left',
     simulation_config: JSON.stringify({ dataset_path: '/workspace/dataset/task', episode: 0, frame: 0, control_hz: 100, use_initial_frame_state: true }),
   }), 0);
   fireEvent.click(screen.getByRole('button', { name: 'Step chunk' }));

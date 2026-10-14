@@ -566,6 +566,16 @@ const InferencePanel = () => {
       {info.serviceType === 'lerobot' && info.policyType === 'diffusion' && (
         <>
           <div className="flex items-center mb-2.5">
+            <label htmlFor="arm-selection" className={classLabel}>Arms</label>
+            <select id="arm-selection" aria-label="Inference arms" className={classTextInput}
+              value={info.armSelection || 'right'} disabled={!isEditable}
+              onChange={(e) => handleChange('armSelection', e.target.value)}>
+              <option value="both">양팔 / Both arms</option>
+              <option value="left">왼손 / Left arm</option>
+              <option value="right">오른손 / Right arm</option>
+            </select>
+          </div>
+          <div className="flex items-center mb-2.5">
             <label htmlFor="eef-ik-backend" className={classLabel}>EEF IK</label>
             <select id="eef-ik-backend" aria-label="EEF IK backend" className={classTextInput}
               value={info.ikBackend || 'cyclo_control'} disabled={!isEditable}

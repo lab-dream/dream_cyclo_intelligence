@@ -123,6 +123,7 @@ const inferenceTaskInfoInitialState = {
   accelerationMode: 'pytorch',
   accelerationEnginePath: '',
   ikBackend: 'cyclo_control',
+  armSelection: 'right',
   ikModelPath: '/workspace/model/nodeik/nodeik_20261010_e2e30k',
   initialPoseSync: false,
   initialPoseSyncDurationS: 5.0,
@@ -306,6 +307,7 @@ const applyInferenceTaskInfo = (state, taskInfo = {}) => {
       taskInfo.accelerationEnginePath ?? state.inferenceTaskInfo.accelerationEnginePath ?? ''
     ),
     ikBackend: String(taskInfo.ikBackend ?? state.inferenceTaskInfo.ikBackend ?? 'cyclo_control'),
+    armSelection: String(taskInfo.armSelection ?? state.inferenceTaskInfo.armSelection ?? 'right'),
     ikModelPath: String(taskInfo.ikModelPath ?? state.inferenceTaskInfo.ikModelPath ?? ''),
     initialPoseSync: Object.prototype.hasOwnProperty.call(taskInfo, 'initialPoseSync')
       ? Boolean(taskInfo.initialPoseSync)

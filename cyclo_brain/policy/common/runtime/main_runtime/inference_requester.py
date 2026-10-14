@@ -60,6 +60,7 @@ class InferenceRequester:
             inference_hz=float(getattr(request, "inference_hz", 0) or 0),
             ik_backend=str(getattr(request, "ik_backend", "") or ""),
             ik_model_path=str(getattr(request, "ik_model_path", "") or ""),
+            arm_selection=str(getattr(request, "arm_selection", "") or "right"),
             action_request_mode=str(getattr(request, "action_request_mode", "") or ""),
             chunkrl_checkpoint=str(getattr(request, "chunkrl_checkpoint", "") or ""),
         )

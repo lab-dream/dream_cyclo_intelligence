@@ -31,6 +31,7 @@ string simulation_config
 # Relative EEF IK: cyclo_control (default), nodeik (.pt model), dls (elbow null-space).
 string ik_backend
 string ik_model_path
+string arm_selection
 string action_request_mode
 string chunkrl_checkpoint
 # Reset state on start/resume, discarded startup target, or failed request.

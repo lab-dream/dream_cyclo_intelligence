@@ -28,6 +28,8 @@ def infer_image_preprocessing(model_path: str, policy_type: str) -> dict[str, st
         if not path.is_file():
             continue
         metadata = json.loads(path.read_text())
+        if metadata.get("resize_mode") == "native":
+            return {"resize_mode": "native"}
         recipe = str(metadata.get("image_recipe", "")).lower()
         if not all(term in recipe for term in (
             "bilinear", "antialias", "aspect-preserving", "zero padding"
@@ -79,6 +81,17 @@ def resize_image(
     padding_alignment: str = "center",
 ) -> np.ndarray:
     """Resize to (width, height), optionally preserving aspect ratio and padding."""
+    if resize_mode == "native":
+        if image.ndim != 3 or image.shape[2] != 3 or image.dtype != np.uint8:
+            raise ValueError("Native policy requires HWC uint8 RGB images")
+        if not target_size or image.shape[:2] != (target_size[1], target_size[0]):
+            raise ValueError(
+                f"Native image shape mismatch: got {image.shape}; expected "
+                f"HWC=({target_size[1] if target_size else '?'}, "
+                f"{target_size[0] if target_size else '?'}, 3). "
+                "Set the camera stream to the training resolution; resizing is disabled."
+            )
+        return image
     if not target_size:
         return image
     width, height = target_size

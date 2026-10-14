@@ -146,9 +146,10 @@ class ControlLoop:
         ik_backend: str = "cyclo_control",
     ) -> None:
         ik_backend = str(ik_backend or "cyclo_control").strip().lower()
-        if ik_backend == "dls" and list(action_keys or []) != ["arm_left", "arm_right"]:
+        if ik_backend == "dls" and (not action_keys or len(set(action_keys)) != len(action_keys)
+                                    or set(action_keys) - {"arm_left", "arm_right"}):
             raise ValueError(
-                "DLS requires action_keys=['arm_left', 'arm_right'] and never commands lift. "
+                "DLS requires selected arm_left/arm_right action keys and never commands lift. "
                 "Restart the LeRobot container to apply the arms-only engine."
             )
         duration_s = float(initial_pose_sync_duration_s)

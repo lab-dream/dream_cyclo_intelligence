@@ -111,6 +111,7 @@ class DLSIK:
         self.reference = None
         self.reference_elbows = None
         self.last_diagnostics = {}
+        self._free_joints = np.ones(len(self.names), dtype=bool)
 
     def _frame_id(self, name):
         if not self.model.existFrame(name):
@@ -214,7 +215,7 @@ class DLSIK:
     def _joint_step(self, Jb, Vb, q, use_posture=True):
         """Re-solve with outward-moving arm joints at their limits held."""
         opt = self.options
-        free = np.ones(len(self.names), dtype=bool)
+        free = self._free_joints.copy()
         th = q[self.q_indices]
         H_grad = (self._posture_gradient(q)
                   if use_posture else np.zeros(len(self.names)))
@@ -261,7 +262,7 @@ class DLSIK:
             self._update(q)
             Jb, _, _, _ = self._task(targets)
             cost = self._posture_cost(q)
-            free = np.ones(len(self.names), dtype=bool)
+            free = self._free_joints.copy()
             th = q[self.q_indices]
             gradient = self._posture_gradient(q)
             for _ in range(len(self.names) + 1):
@@ -296,7 +297,20 @@ class DLSIK:
                 break
         return q, steps
 
-    def solve(self, seed, left, right):
+    def solve(self, seed, left, right, locked_joint_names=()):
+        """Reuse the bimanual solve while holding selected seed joints fixed."""
+        if set(locked_joint_names) - set(self.names):
+            raise ValueError("Locked joints must belong to the DLS arm joints")
+        self._free_joints = ~np.isin(self.names, list(locked_joint_names))
+        if not self._free_joints.any():
+            self._free_joints[:] = True
+            raise ValueError("DLS requires at least one free joint")
+        try:
+            return self._solve(seed, left, right)
+        finally:
+            self._free_joints[:] = True
+
+    def _solve(self, seed, left, right):
         targets = [self._validate_target(T) for T in (left, right)]
         q = self._configuration(seed)
         if self.reference is None:

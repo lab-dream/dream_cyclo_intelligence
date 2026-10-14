@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import re
+import numpy as np
 from typing import Dict, Iterable
 
 from .constants import IMAGE_KEY_PREFIX as _IMAGE_KEY_PREFIX
@@ -42,6 +43,49 @@ _CAMERA_SEMANTIC_RE = re.compile(
 
 class IoMappingMixin:
     """Robot wiring — camera / state modality resolution and teardown."""
+
+    def _configure_arm_selection(self, request) -> None:
+        """Project existing full model/IK output through RobotClient group order."""
+        self._action_indices = None
+        self._arm_selection = "both"
+        if self._policy.config.type != "diffusion":
+            return
+        selection = str(getattr(request, "arm_selection", "both") or "right").strip().lower()
+        if selection not in {"both", "left", "right"}:
+            raise ValueError("arm_selection must be both, left, or right")
+        keys = list(self._action_keys)
+        if not set(keys) & {"arm_left", "arm_right"}:
+            return  # Existing single-arm robot groups do not need projection.
+        selected = [key for key in keys if key in (
+            {"arm_left", "arm_right"} if selection == "both" else {f"arm_{selection}"})]
+        if not selected:
+            raise ValueError(f"Robot has no command group for arm_selection={selection}")
+        adapter = self._relative_eef
+        if adapter is not None:
+            adapter.command_arms = tuple(key.removeprefix("arm_") for key in selected)
+            # Shared-lift IK must publish its lift solution with either arm.
+            if adapter.ik_backend != "dls" and "lift" in keys:
+                selected.append("lift")
+        indices = []
+        offset = 0
+        for key in keys:
+            width = len(self._robot._action_groups[key]["joint_names"])
+            if key in selected:
+                indices.extend(range(offset, offset + width))
+            offset += width
+        self._full_action_dim = offset
+        self._action_indices = indices
+        self._action_keys = selected
+        self._arm_selection = selection
+        logger.info("Arm selection=%s command groups=%s", selection, selected)
+
+    def _select_action_chunk(self, chunk):
+        indices = getattr(self, "_action_indices", None)
+        if indices is None:
+            return chunk
+        if chunk.ndim != 2 or chunk.shape[1] != self._full_action_dim or not np.isfinite(chunk).all():
+            raise ValueError("Invalid action chunk for the configured command groups")
+        return np.ascontiguousarray(chunk[:, indices])
 
     def _init_robot(self, robot_type: str, robot=None) -> None:
         """Create RobotClient + resolve camera / state mappings."""

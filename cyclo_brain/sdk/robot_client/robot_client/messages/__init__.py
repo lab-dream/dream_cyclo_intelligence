@@ -72,6 +72,7 @@ bool initial_pose_sync
 float64 initial_pose_sync_duration_s
 string ik_backend
 string ik_model_path
+string arm_selection
 string chunkrl_checkpoint
 """
 
@@ -97,6 +98,7 @@ float64 inference_hz
 string simulation_config
 string ik_backend
 string ik_model_path
+string arm_selection
 string action_request_mode
 string chunkrl_checkpoint
 bool reset_policy_state
