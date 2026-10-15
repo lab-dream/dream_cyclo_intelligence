@@ -688,7 +688,7 @@ const InferencePanel = () => {
           {supportsChunkRL && (
             <button type="button" onClick={() => handleChange('actionRequestMode', 'chunkrl')}
               disabled={!isEditable} className={actionModeButtonClass(actionRequestMode === 'chunkrl')}
-              aria-label="Use ChunkRL action requests" title="Independent left/right arm chunk decisions">
+              aria-label="Use ChunkRL action requests" title="Select a waypoint for each enabled arm">
               <span className="truncate">ChunkRL</span>
             </button>
           )}
@@ -705,7 +705,7 @@ const InferencePanel = () => {
             <button type="button" onClick={() => setShowChunkrlBrowser(true)} disabled={!isEditable}
               aria-label="Browse ChunkRL checkpoint"><MdFolderOpen size={20} /></button>
           </div>
-          <p className="text-xs text-gray-500">Use a relative EEF Diffusion model. Each arm selects its own waypoint; both targets use the selected IK solver.</p>
+          <p className="text-xs text-gray-500">Use a relative EEF Diffusion model. Each enabled arm selects its own waypoint through the selected IK solver. Single-hand models use only their trained hand.</p>
           <button type="button" className="text-xs text-blue-600 underline" disabled={!isEditable}
             onClick={() => {
               dispatch(setInferenceTaskInfo({ policyPath: '/workspace/model/lerobot/diffusion_task0_relative_482000/pretrained_model', inferenceHz: 30, actionRequestMode: 'chunkrl' }));

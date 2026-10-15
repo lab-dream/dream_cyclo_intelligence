@@ -271,6 +271,7 @@ class RelativeEEFAdapter:
         batch[OBS_STATE] = torch.as_tensor(
             state, dtype=tensor.dtype, device=tensor.device
         ).unsqueeze(0)
+        self.observation_relative = state.copy()
         return batch
 
     def bimanual_relative(self, values: np.ndarray) -> np.ndarray:
@@ -291,6 +292,24 @@ class RelativeEEFAdapter:
         start = 0 if hand == "left" else 10
         full[:, start:start + 10] = values
         return full
+
+    def pose_preview(self, action=None) -> dict:
+        """The same TCP anchors and UMI poses for live and dataset viewers."""
+        anchors = []
+        for side in range(2):
+            pose = np.concatenate([self.env_obs[f"robot{side}_eef_pos"][-1],
+                                   self.env_obs[f"robot{side}_eef_rot_axis_angle"][-1]])
+            anchors.append(pose_to_mat(pose).tolist())
+        observation = self.observation_relative
+        return dict(
+            policy_hand=getattr(self, "policy_hand", "both"),
+            arm_selection="both" if len(self.command_arms) == 2 else self.command_arms[0],
+            anchor_poses=anchors,
+            observation_poses=get_real_umi_action(self.bimanual_relative(observation), self.env_obs,
+                                                 action_pose_repr="relative").tolist(),
+            action_poses=get_real_umi_action(self.bimanual_relative(action), self.env_obs,
+                                            action_pose_repr="relative").tolist() if action is not None else [],
+        )
 
     def decode_action(self, chunk: np.ndarray) -> np.ndarray:
         """Restore TCP targets; DLS outputs only the arms and two grippers."""

@@ -721,24 +721,31 @@ class GR00TInference:
         if not self.is_ready:
             return self.fail("Not in inference mode")
 
+        from inference_telemetry import InferenceTrace
+        trace = InferenceTrace()
         try:
-            images = self.robot.get_images(format="rgb")
-            joints = self.robot.get_joint_positions()
-            task = request.task_instruction
-
-            observation = self.preprocess(images, joints, task)
+            with trace.stage("observation"):
+                images = self.robot.get_images(format="rgb")
+                joints = self.robot.get_joint_positions()
+                task = request.task_instruction
+            with trace.stage("preprocess"):
+                observation = self.preprocess(images, joints, task)
             if "success" in observation:
                 return observation
 
             t0 = time.monotonic()
             self.logger.info("Running GR00T inference...")
-            action, info = self.policy.get_action(observation)
+            with trace.stage("policy"):
+                action, info = self.policy.get_action(observation)
             self.logger.info("GR00T inference completed in %.3fs", time.monotonic() - t0)
-            return self.postprocess_action(action)
+            with trace.stage("postprocess"):
+                return self.postprocess_action(action)
 
         except Exception as e:
             self.logger.error("Inference failed: %s", e, exc_info=True)
             return self.fail(str(e))
+        finally:
+            self._last_inference_telemetry = trace.finish()
 
     def preprocess(self, images: dict, joints: dict, task: str) -> dict:
         """Build observation dict from raw sensor data. Returns fail dict on error."""

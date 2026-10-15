@@ -75,6 +75,24 @@ def test_independent_indices_and_non_identity_row_column_rotation_roundtrip():
     np.testing.assert_allclose(actor_input, expected, atol=1e-6)
 
 
+@pytest.mark.parametrize('hand,side,index', [('left', 0, 1), ('right', 1, 0)])
+def test_single_hand_selects_only_trained_arm_and_keeps_world_target(hand, side, index):
+    deciders = manager()
+    deciders.policy_hand = hand
+    deciders.command_arms = (hand,)
+    chunk = proposal()[:, side * 10:(side + 1) * 10]
+    result = deciders.select(chunk, observation())
+    assert result.shape == (1, 10)
+    np.testing.assert_allclose(result[0], chunk[index], atol=2e-6)
+    assert [d['arm'] for d in deciders.last_decisions] == [hand]
+    assert deciders.arms[1 - side].current_chunk is None
+    kept = deciders.select(chunk, observation(.08))
+    new = np.tile(kept, (1, 2))
+    old = np.tile(chunk[index + 1:index + 2], (1, 2))
+    np.testing.assert_allclose(absolute_output(new, observation(.08), side),
+                               absolute_output(old, observation(), side), atol=2e-6)
+
+
 def test_kept_chunks_remain_at_original_world_targets_after_anchor_moves():
     deciders = manager()
     chunk = proposal()
@@ -86,6 +104,22 @@ def test_kept_chunks_remain_at_original_world_targets_after_anchor_moves():
     for side, index in [(0, 2), (1, 1)]:
         np.testing.assert_allclose(absolute_output(next_selected, new_obs, side),
                                   absolute_output(chunk[index:index+1], old_obs, side), atol=2e-6)
+
+
+def test_bimanual_policy_commanding_only_right_skips_left_decider():
+    deciders = manager()
+    deciders.command_arms = ('right',)
+    chunk = proposal()
+    chunk[:, :10] = 0  # Unused arm predictions must not be evaluated as rotations.
+    obs = {**observation(), 'robot0_gripper_width': np.array([[.25]])}
+    selected = deciders.select(chunk, obs)
+    assert selected.shape == (1, 20)
+    np.testing.assert_allclose(selected[0, 10:], chunk[0, 10:], atol=2e-6)
+    np.testing.assert_allclose(absolute_output(selected, obs, 0),
+                               pose_to_mat(np.r_[obs['robot0_eef_pos'][-1], obs['robot0_eef_rot_axis_angle'][-1]]), atol=2e-6)
+    assert selected[0, 9] == .25
+    assert deciders.arms[0].current_chunk is None
+    assert [d['arm'] for d in deciders.last_decisions] == ['right']
 
 
 def test_right_arm_failure_rolls_back_left_arm_history():

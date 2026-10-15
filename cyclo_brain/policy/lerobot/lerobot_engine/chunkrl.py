@@ -23,7 +23,8 @@ DEFAULT_CHECKPOINT = "/workspace/model/chunkrl/robomimic_multitask_v5/best_eval.
 class BimanualChunkRL:
     """Share frozen actor weights, keep each arm's execution state separate."""
 
-    def __init__(self, checkpoint: str, device="cpu") -> None:
+    def __init__(self, checkpoint: str, device="cpu", *, policy_hand="both",
+                 command_arms=("left", "right")) -> None:
         path = Path(checkpoint or DEFAULT_CHECKPOINT).expanduser()
         if not path.is_file():
             raise FileNotFoundError(f"ChunkRL checkpoint not found: {path}")
@@ -33,6 +34,8 @@ class BimanualChunkRL:
         self.arms = [left, ChunkDeciderWrapper(left.actor, relative_action=True, device=device)]
         self.length = left.config.L
         self.last_decisions = []
+        self.policy_hand = policy_hand
+        self.command_arms = tuple(command_arms)
 
     def reset(self) -> None:
         for arm in self.arms:
@@ -54,13 +57,24 @@ class BimanualChunkRL:
 
     def select(self, chunk: np.ndarray, env_obs: dict) -> np.ndarray:
         chunk = np.asarray(chunk, dtype=np.float32)
-        if chunk.shape != (self.length, 20) or not np.isfinite(chunk).all():
-            raise ValueError(f"ChunkRL expects finite ({self.length}, 20) relative EEF actions, got {chunk.shape}.")
-        selected, decisions = [], []
+        hand = getattr(self, "policy_hand", "both")
+        width = 20 if hand == "both" else 10
+        if chunk.shape != (self.length, width) or not np.isfinite(chunk).all():
+            raise ValueError(f"ChunkRL expects finite ({self.length}, {width}) relative EEF actions, got {chunk.shape}.")
+        selected = np.zeros((1, width), dtype=np.float32)
+        decisions = []
         snapshot = self.snapshot()
         try:
             for side, arm in enumerate(self.arms):
-                proposal = chunk[:, side * 10 : (side + 1) * 10].copy()
+                name = "left" if side == 0 else "right"
+                if hand != "both" and hand != name:
+                    continue
+                offset = side * 10 if hand == "both" else 0
+                if name not in getattr(self, "command_arms", ("left", "right")):
+                    selected[0, offset + 3:offset + 9] = [1, 0, 0, 0, 1, 0]
+                    selected[0, offset + 9] = env_obs[f"robot{side}_gripper_width"][-1, 0]
+                    continue
+                proposal = chunk[:, offset:offset + 10].copy()
                 rotations = rot6d_to_mat(proposal[:, 3:9])
                 if not np.allclose(np.linalg.det(rotations), 1, atol=1e-3):
                     raise ValueError("ChunkRL received degenerate rot6d predictions.")
@@ -73,15 +87,15 @@ class BimanualChunkRL:
                 # Wrapper returns relative column rot6d; UMI/IK consumes row rot6d.
                 rotation = TF_mat.from_rot6d(action[:3], action[3:9]).as_matrix()[:3, :3]
                 action[3:9] = mat_to_rot6d(rotation)
-                selected.append(action)
-                decisions.append({"arm": "left" if side == 0 else "right",
+                selected[0, offset:offset + 10] = action
+                decisions.append({"arm": name,
                                   "switched": bool(switched), "index": int(arm.chunk_step - 1),
                                   "proposed_index": int(index)})
         except Exception:
             self.restore(snapshot)
             raise
         self.last_decisions = decisions
-        return np.concatenate(selected).reshape(1, 20)
+        return selected
 
 
 def configure_chunkrl(engine, request) -> None:
@@ -96,8 +110,11 @@ def configure_chunkrl(engine, request) -> None:
     if mode != "chunkrl":
         return
     if config.type != "diffusion" or engine._relative_eef is None:
-        raise ValueError("ChunkRL requires a Diffusion checkpoint with state='relative' and 20-dimensional EEF actions. Select the relative model; joint-action models support Async/Sync.")
-    manager = BimanualChunkRL(getattr(request, "chunkrl_checkpoint", ""), device=engine._device)
+        raise ValueError("ChunkRL requires a Diffusion checkpoint with state='relative' and per-hand 10-dimensional EEF actions. Select the relative model; joint-action models support Async/Sync.")
+    adapter = engine._relative_eef
+    manager = BimanualChunkRL(getattr(request, "chunkrl_checkpoint", ""), device=engine._device,
+                             policy_hand=getattr(adapter, "policy_hand", "both"),
+                             command_arms=getattr(adapter, "command_arms", ("left", "right")))
     available = config.horizon - config.n_obs_steps + 1
     if manager.length > available:
         raise ValueError(f"ChunkRL L={manager.length} exceeds Diffusion's {available} available future actions.")

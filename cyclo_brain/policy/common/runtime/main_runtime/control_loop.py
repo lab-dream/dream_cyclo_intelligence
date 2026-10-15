@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import sys
@@ -84,8 +85,10 @@ class ControlLoop:
         latency_warmup_samples: int = 1,
         max_refill_latency_s: Optional[float] = 2.0,
         action_request_mode: str = ACTION_REQUEST_MODE_ASYNC,
+        telemetry_callback=None,
     ) -> None:
         self._requester = requester
+        self._telemetry_callback = telemetry_callback
         self._default_inference_hz = positive_finite_or_default(inference_hz, 15.0)
         self._default_control_hz = positive_finite_or_default(control_hz, 100.0)
         self._default_chunk_align_window_s = positive_finite_or_default(
@@ -281,6 +284,7 @@ class ControlLoop:
         latency_s = time.monotonic() - started_at
         self._record_request_latency(latency_s)
         chunk = self._decode_action_response(response)
+        self._emit_telemetry(response, latency_s, mode=self._action_request_mode)
 
         with self._lock:
             if (
@@ -491,17 +495,25 @@ class ControlLoop:
                 if generation == self._generation:
                     self._chunkrl_reset_pending = True
             logger.warning("get_action raised: %s", e)
+            if generation == self._generation:
+                self._emit_telemetry(None, latency_s, accepted=False, error=str(e), mode=action_request_mode)
             return
         latency_s = time.monotonic() - started_at
         self._record_request_latency(latency_s)
+        buffer_started = time.monotonic()
         try:
             chunk = self._decode_action_response(response)
+            if action_request_mode == ACTION_REQUEST_MODE_CHUNKRL and len(chunk) != 1:
+                raise ValueError("ChunkRL must return exactly one selected waypoint")
         except ValueError as e:
             with self._lock:
                 if generation == self._generation:
                     self._chunkrl_reset_pending = True
             logger.warning("get_action response rejected: %s", e)
+            if generation == self._generation:
+                self._emit_telemetry(response, latency_s, accepted=False, error=str(e), mode=action_request_mode)
             return
+        buffered = False
         with self._lock:
             if (
                 generation == self._generation
@@ -519,10 +531,6 @@ class ControlLoop:
                     else latency_s + buffer_delay_s
                 )
                 if action_request_mode == ACTION_REQUEST_MODE_CHUNKRL:
-                    if len(chunk) != 1:
-                        self._chunkrl_reset_pending = True
-                        logger.warning("ChunkRL must return exactly one selected waypoint")
-                        return
                     produced = self._processor.push_waypoint(chunk[0])
                     self._chunkrl_reset_pending = False
                 else:
@@ -531,6 +539,7 @@ class ControlLoop:
                         scheduled_start_delay_s=scheduled_start_delay_s,
                         align=action_request_mode != ACTION_REQUEST_MODE_SYNC,
                     )
+                buffered = True
                 scheduled_start_text = (
                     "none"
                     if scheduled_start_delay_s is None
@@ -547,6 +556,28 @@ class ControlLoop:
                     buffer_delay_s,
                     scheduled_start_text,
                 )
+        if buffered:
+            self._emit_telemetry(response, latency_s,
+                                 buffer_ms=(time.monotonic() - buffer_started) * 1000,
+                                 mode=action_request_mode)
+
+    def _emit_telemetry(self, response, request_s, *, buffer_ms=0.0, accepted=True, error="", mode=""):
+        callback = getattr(self, "_telemetry_callback", None)
+        if callback is None:
+            return
+        try:
+            value = json.loads(getattr(response, "telemetry", "") or "{}")
+            timings = value.setdefault("timings_ms", {})
+            timings.update(request=request_s * 1000, buffer=buffer_ms,
+                           total=request_s * 1000 + buffer_ms)
+            value.update(success=accepted and bool(getattr(response, "success", False)),
+                         message=error or getattr(response, "message", ""),
+                         action_request_mode=mode)
+            if not value["success"] and isinstance(value.get("eef"), dict):
+                value["eef"] = {**value["eef"], "action_poses": []}
+            callback(value)
+        except Exception:
+            logger.warning("Cannot report inference telemetry", exc_info=True)
 
     @staticmethod
     def _decode_action_response(response) -> np.ndarray:

@@ -82,6 +82,7 @@ if os.path.exists(_ACTION_CHUNK_PATH) and _ACTION_CHUNK_PATH not in sys.path:
 from engine import InferenceEngine  # noqa: E402
 
 import torch  # noqa: E402
+from inference_telemetry import InferenceTrace
 
 from robot_client import RobotClient  # noqa: E402
 from lerobot.policies.pretrained import PreTrainedPolicy  # noqa: E402
@@ -205,9 +206,10 @@ class LeRobotEngine(
             self._loaded_robot_type = robot_type
             self._image_resize = self._infer_image_resize(self._policy)
             self._configure_relative_eef(model_path, robot_type, request)
+            self._configure_arm_selection(request)
+            self._action_request_mode = getattr(request, "action_request_mode", "") or "async"
             from .chunkrl import configure_chunkrl
             configure_chunkrl(self, request)
-            self._configure_arm_selection(request)
             self._dataset_simulation = dataset_robot
 
             return {
@@ -232,25 +234,37 @@ class LeRobotEngine(
         if manager is not None and getattr(request, "reset_policy_state", False):
             manager.reset()
         snapshot = manager.snapshot() if manager is not None else None
+        trace = InferenceTrace()
+        preview = None
         try:
-            obs = self._build_policy_observation(getattr(request, "task_instruction", ""))
+            with trace.stage("observation"):
+                obs = self._build_policy_observation(getattr(request, "task_instruction", ""))
+                if "success" not in obs and self._relative_eef is not None and hasattr(self._relative_eef, "pose_preview"):
+                    preview = self._relative_eef.pose_preview()
             if "success" in obs:
                 return obs
 
             with torch.inference_mode():
-                preprocessed = self._preprocessor(obs)
-                action = self._predict_chunk(preprocessed)
-                action = self._postprocessor(action)
-
-            chunk = self._to_numpy_chunk(action)
-            if manager is not None:
-                chunk = manager.select(chunk, self._relative_eef.env_obs)
-                logger.info("ChunkRL decisions: %s", manager.last_decisions)
-            if getattr(self, "_dataset_simulation", None) is not None:
-                self._dataset_simulation.relative_action = chunk.copy()
-            if self._relative_eef is not None:
-                chunk = self._relative_eef.decode_action(chunk)
-            chunk = self._select_action_chunk(chunk)
+                with trace.stage("preprocess"):
+                    preprocessed = self._preprocessor(obs)
+                with trace.stage("policy"):
+                    action = self._predict_chunk(preprocessed)
+                with trace.stage("postprocess"):
+                    action = self._postprocessor(action)
+                    chunk = self._to_numpy_chunk(action)
+                    if manager is not None:
+                        with trace.stage("chunkrl"):
+                            chunk = manager.select(chunk, self._relative_eef.env_obs)
+                        logger.info("ChunkRL decisions: %s", manager.last_decisions)
+                    if getattr(self, "_dataset_simulation", None) is not None:
+                        self._dataset_simulation.relative_action = chunk.copy()
+                    if self._relative_eef is not None:
+                        relative = chunk
+                        with trace.stage("ik"):
+                            chunk = self._relative_eef.decode_action(chunk)
+                        if hasattr(self._relative_eef, "pose_preview"):
+                            preview = self._relative_eef.pose_preview(relative)
+                    chunk = self._select_action_chunk(chunk)
             T, D = chunk.shape
             logger.info("Action chunk: T=%d, D=%d", T, D)
             return {
@@ -268,6 +282,10 @@ class LeRobotEngine(
                 manager.restore(snapshot)
             logger.error("get_action_chunk failed: %s", e, exc_info=True)
             return self._fail(str(e))
+        finally:
+            self._last_inference_telemetry = trace.finish(
+                eef=preview, action_request_mode=getattr(self, "_action_request_mode", "async"),
+                chunkrl_decisions=manager.last_decisions if manager is not None else [])
 
     def dataset_simulation_command(self, request: Any) -> Dict[str, Any]:
         from .dataset_simulation import dataset_simulation_command

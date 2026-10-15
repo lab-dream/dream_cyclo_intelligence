@@ -60,6 +60,7 @@ int32 chunk_size
 int32 action_dim
 float64[] action_list
 string simulation_state
+string telemetry
 """
 
 
@@ -93,6 +94,7 @@ class EngineCommandResponse:
     action_dim: int = 0
     action_list: List[float] = field(default_factory=list)
     simulation_state: str = ""
+    telemetry: str = ""
 
 
 def request_from_message(message: Any) -> EngineCommandRequest:
@@ -132,6 +134,7 @@ def response_from_message(message: Any) -> EngineCommandResponse:
         action_dim=int(getattr(message, "action_dim", 0)),
         action_list=[float(v) for v in list(action_list)] if action_list is not None else [],
         simulation_state=str(getattr(message, "simulation_state", "") or ""),
+        telemetry=str(getattr(message, "telemetry", "") or ""),
     )
 
 
@@ -146,6 +149,7 @@ def response_to_message_kwargs(response: EngineCommandResponse) -> dict:
         "action_dim": int(response.action_dim),
         "action_list": np.asarray(response.action_list, dtype=np.float64),
         "simulation_state": str(response.simulation_state),
+        "telemetry": str(response.telemetry),
     }
 
 

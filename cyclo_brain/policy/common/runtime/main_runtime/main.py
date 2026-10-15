@@ -43,6 +43,7 @@ from .inference_requester import (  # noqa: E402
 from .service_handler import ServiceHandler  # noqa: E402
 from .session_state import SessionState  # noqa: E402
 from .zenoh_client import ZenohEngineCommandClient  # noqa: E402
+from inference_telemetry import TelemetryPublisher
 
 
 logger = get_logger("main_runtime")
@@ -83,6 +84,8 @@ class MainRuntime:
             ),
         )
         self._session = SessionState()
+        self._telemetry_publisher = TelemetryPublisher(backend, router_ip=router_ip,
+            router_port=router_port, domain_id=domain_id)
         self._control_loop = ControlLoop(
             self._requester,
             inference_hz=float(os.environ.get("INFERENCE_HZ", "15.0")),
@@ -99,6 +102,7 @@ class MainRuntime:
                 "REFILL_LATENCY_SAMPLE_MAX_S", "2.0"
             ),
             action_request_mode=os.environ.get("ACTION_REQUEST_MODE", "async"),
+            telemetry_callback=self._telemetry_publisher.publish,
         )
         self._engine_client = engine_client
         self._command_srv = None
@@ -162,6 +166,7 @@ class MainRuntime:
     def shutdown(self) -> None:
         self._shutdown.set()
         self._control_loop.shutdown()
+        self._telemetry_publisher.close()
         if self._command_srv is not None:
             try:
                 self._command_srv.close()

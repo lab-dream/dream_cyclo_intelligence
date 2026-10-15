@@ -30,7 +30,8 @@ function buildEefPosePaths(data, relative) {
   if (!data?.anchor_poses?.length) return [];
   const paths = ['observation', 'action'].flatMap((kind) => (
     kind === 'action' && ['left', 'right', 'bimanual_right'].includes(data.arm_selection)
-      ? [data.arm_selection === 'left' ? 0 : 1] : [0, 1]
+      ? [data.arm_selection === 'left' ? 0 : 1]
+      : ['left', 'right'].includes(data.policy_hand) ? [data.policy_hand === 'left' ? 0 : 1] : [0, 1]
   ).map((side) => {
     const anchor = new THREE.Matrix4().set(...data.anchor_poses[side].flat());
     const inverseAnchor = anchor.clone().invert();
@@ -533,7 +534,7 @@ function SourceSelector({ visible, value, onChange }) {
   if (!visible) return null;
 
   return (
-    <div className="absolute bottom-2 left-2 z-10 flex overflow-hidden rounded bg-black/50">
+    <div className="absolute top-12 left-2 z-10 flex overflow-hidden rounded bg-black/50">
       {[
         ['state', 'State'],
         ['action', 'Action'],
@@ -688,7 +689,7 @@ export default function RobotViewer3D({
   useJointStateSubscription(
     handleJointState,
     handleActionChunk,
-    mode === 'live' && !!robot && !eefData && !controlledJointState,
+    mode === 'live' && !!robot && !controlledJointState,
     {
       visualizationSource,
       liveUpdateHz,

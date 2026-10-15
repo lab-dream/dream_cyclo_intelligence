@@ -51,3 +51,5 @@ int32 action_dim
 float64[] action_list
 # Dataset simulation only: joints, dataset images, and relative/absolute EEF poses.
 string simulation_state
+# JSON timing breakdown and optional measured/predicted EEF pose preview.
+string telemetry

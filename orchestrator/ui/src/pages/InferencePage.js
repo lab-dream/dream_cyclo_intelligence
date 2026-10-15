@@ -28,6 +28,8 @@ import HeartbeatStatus from '../components/HeartbeatStatus';
 import InlineSystemStatus from '../components/InlineSystemStatus';
 import ImageGrid from '../components/ImageGrid';
 import RobotViewer3D from '../components/RobotViewer3D';
+import InferenceTimingPanel from '../components/InferenceTimingPanel';
+import useInferenceTelemetry from '../hooks/useInferenceTelemetry';
 import InferencePanel from '../components/InferencePanel';
 import DatasetSimulationPanel, { DatasetSimulationImages } from '../components/DatasetSimulationPanel';
 import RecordTopicMonitor from '../components/RecordTopicMonitor';
@@ -46,6 +48,7 @@ export default function InferencePage({ isActive = true }) {
   const robotType = useSelector((state) => state.tasks.robotType);
   const joystickMode = useSelector((state) => state.tasks.joystickMode);
   const taskInfo = useSelector(selectInferenceTaskInfo, shallowEqual);
+  const telemetry = useInferenceTelemetry(taskInfo.serviceType, robotType, isActive);
 
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [show3DViewer, setShow3DViewer] = useState(true);
@@ -188,15 +191,17 @@ export default function InferencePage({ isActive = true }) {
                   </div>
                 </div>
               )}
-              <InlineSystemStatus />
-              <div className="flex-grow" />
-              {!datasetSimulation && <InferenceControlPanel />}
+              <div className="min-w-0 flex-1 overflow-x-auto">
+                <div className="w-max"><InlineSystemStatus /></div>
+              </div>
+              {!datasetSimulation && <div className="shrink-0"><InferenceControlPanel /></div>}
             </div>
             <div className={classHeartbeatStatus}>
               <HeartbeatStatus />
             </div>
             {datasetSimulation ? <DatasetSimulationImages frame={simulationFrame} /> : <ImageGrid isActive={isActive} />}
           </div>
+          <InferenceTimingPanel telemetry={telemetry} />
           <div className="flex-[4] min-h-[120px] flex flex-row items-center justify-center mx-1 gap-2 h-full relative">
             {show3DViewer && (
               <div className="h-[85%] rounded-2xl overflow-hidden relative" style={{ aspectRatio: '4/3' }}>
@@ -204,8 +209,8 @@ export default function InferencePage({ isActive = true }) {
                   mode={datasetSimulation ? 'dataset' : 'live'}
                   showSourceSelector={!datasetSimulation}
                   defaultVisualizationSource={isRobotMode ? 'state' : 'action'}
-                  controlledJointState={simulationFrame?.joint_state}
-                  eefData={simulationFrame}
+                  controlledJointState={datasetSimulation ? simulationFrame?.joint_state : null}
+                  eefData={datasetSimulation ? simulationFrame : telemetry?.eef}
                 />
               </div>
             )}

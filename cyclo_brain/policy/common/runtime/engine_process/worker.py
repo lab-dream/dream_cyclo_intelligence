@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -67,10 +68,30 @@ class EngineWorker:
         self._service = None
         self._shutdown = threading.Event()
         self._command_lock = threading.RLock()
+        self._telemetry_publisher = None
 
     def handle(self, request: Any) -> EngineCommandResponse:
         with self._command_lock:
-            return self._handle(request)
+            started = time.perf_counter()
+            command = int(getattr(request, "command", 0))
+            if command in (CMD_GET_ACTION, CMD_STEP_DATASET_SIMULATION):
+                self._engine._last_inference_telemetry = None
+            response = self._handle(request)
+            if command in (CMD_GET_ACTION, CMD_STEP_DATASET_SIMULATION):
+                value = dict(getattr(self._engine, "_last_inference_telemetry", None) or {})
+                value.update(success=response.success, message=response.message, seq_id=response.seq_id)
+                if command == CMD_STEP_DATASET_SIMULATION:
+                    value["source"] = "dataset"
+                value.setdefault("timings_ms", {})["engine_request"] = (time.perf_counter() - started) * 1000
+                if not response.success and isinstance(value.get("eef"), dict):
+                    value["eef"] = {**value["eef"], "action_poses": []}
+                response.telemetry = json.dumps(value, allow_nan=False)
+                if command == CMD_STEP_DATASET_SIMULATION and self._telemetry_publisher is not None:
+                    self._telemetry_publisher.publish(value)
+            elif command in (CMD_LOAD_POLICY, CMD_UNLOAD_POLICY, CMD_LOAD_DATASET_SIMULATION, CMD_UNLOAD_DATASET_SIMULATION):
+                if self._telemetry_publisher is not None:
+                    self._telemetry_publisher.publish(dict(event="reset", success=response.success))
+            return response
 
     def _handle(self, request: Any) -> EngineCommandResponse:
         req = (
@@ -164,6 +185,9 @@ class EngineWorker:
         """Host the internal EngineCommand service and block until shutdown."""
         if ROS2ServiceServer is None:
             raise RuntimeError("zenoh_ros2_sdk.ROS2ServiceServer is unavailable")
+        from inference_telemetry import TelemetryPublisher
+        self._telemetry_publisher = TelemetryPublisher(service_name.strip("/").split("/")[0],
+            router_ip=router_ip, router_port=router_port, domain_id=domain_id)
         self._service = ROS2ServiceServer(
             service_name=service_name,
             srv_type="interfaces/srv/EngineCommand",
@@ -183,6 +207,9 @@ class EngineWorker:
 
     def shutdown(self) -> None:
         self._shutdown.set()
+        if self._telemetry_publisher is not None:
+            self._telemetry_publisher.close()
+            self._telemetry_publisher = None
         if self._service is not None:
             try:
                 self._service.close()
