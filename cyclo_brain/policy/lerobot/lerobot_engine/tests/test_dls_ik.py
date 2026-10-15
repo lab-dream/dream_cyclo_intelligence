@@ -83,6 +83,35 @@ class DLSRelativeEEFTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "DLS IK target did not converge"):
             self.adapter.decode_action(chunk)
 
+    def test_ten_dimensional_hands_match_selected_pose_and_lock_other_joints(self):
+        raw = np.array([self.measured[name] for name in self.state_names])
+        batch = torch.tensor(np.stack([raw, raw])[None])
+        full_state = self.adapter.encode_observation({"observation.state": batch})["observation.state"]
+        for side, index in (("left", 0), ("right", 1)):
+            with self.subTest(side=side):
+                self.adapter.policy_hand = side
+                self.adapter.command_arms = (side,)
+                state = self.adapter.encode_observation({"observation.state": batch})["observation.state"]
+                torch.testing.assert_close(state, full_state[..., index * 10:(index + 1) * 10])
+                offsets = [[0, 0, 0], [0, 0, 0]]
+                offsets[index] = [.01, .005, .01]
+                full_chunk, poses = self.chunk([offsets, offsets])
+                commands = self.adapter.decode_action(full_chunk[:, index * 10:(index + 1) * 10])
+                self.assert_targets(np.c_[commands, np.full(2, self.measured["lift_joint"])], poses)
+                other = 1 - index
+                np.testing.assert_array_equal(commands[:, other * 8:other * 8 + 7],
+                    np.tile([self.measured[name] for name in self.adapter._arm_names["right" if side == "left" else "left"]], (2, 1)))
+                engine = IoMappingMixin()
+                engine._policy = SimpleNamespace(config=SimpleNamespace(type="diffusion", input_features={}))
+                engine._robot = self.robot
+                engine._relative_eef = self.adapter
+                engine._action_keys = list(self.adapter.action_keys)
+                engine._configure_arm_selection(SimpleNamespace(arm_selection="both"))
+                self.assertEqual(engine._action_keys, [f"arm_{side}"])
+                self.assertEqual(engine._select_action_chunk(commands).shape, (2, 8))
+                with self.assertRaisesRegex(ValueError, "checkpoint requires arm_selection"):
+                    engine._configure_arm_selection(SimpleNamespace(arm_selection="right" if side == "left" else "left"))
+
     def test_bimanual_right_ignores_left_policy_target_and_selects_right_gripper(self):
         engine = IoMappingMixin()
         engine._policy = SimpleNamespace(config=SimpleNamespace(type="diffusion"))

@@ -251,9 +251,9 @@ def dataset_simulation_command(engine, request):
         "finished": robot.frame >= robot.length - 1, "frames": frames,
         "observation_relative": relative_observation.tolist() if relative_observation is not None else [],
         "action_relative": relative_action.tolist() if relative_action is not None else [],
-        "observation_poses": get_real_umi_action(relative_observation, adapter.env_obs,
+        "observation_poses": get_real_umi_action(adapter.bimanual_relative(relative_observation), adapter.env_obs,
                                                 action_pose_repr="relative").tolist() if adapter is not None else [],
-        "action_poses": get_real_umi_action(relative_action, adapter.env_obs,
+        "action_poses": get_real_umi_action(adapter.bimanual_relative(relative_action), adapter.env_obs,
                                            action_pose_repr="relative").tolist() if relative_action is not None else [],
         "anchor_poses": anchors, "hardware_publish": False,
     }

@@ -36,6 +36,13 @@ class RelativeEEFAdapter:
             raise ValueError(
                 "Dream relative EEF checkpoints require robot_type=ffw_sg2_rev1."
             )
+        config_path = Path(model_path) / "config.json"
+        saved = json.loads(config_path.read_text()) if config_path.is_file() else {}
+        self.policy_hand = saved.get("hand", "both")
+        if self.policy_hand not in {"both", "left", "right"}:
+            raise ValueError(f"Unsupported relative EEF hand: {self.policy_hand!r}.")
+        self.command_arms = (("left", "right") if self.policy_hand == "both"
+                             else (self.policy_hand,))
         self.action_keys = ["arm_left", "arm_right"]
         if self.ik_backend != "dls":
             self.action_keys.append("lift")
@@ -257,21 +264,37 @@ class RelativeEEFAdapter:
             ],
             axis=-1,
         )
+        hand = getattr(self, "policy_hand", "both")
+        if hand != "both":
+            start = 0 if hand == "left" else 10
+            state = state[..., start:start + 10]
         batch[OBS_STATE] = torch.as_tensor(
             state, dtype=tensor.dtype, device=tensor.device
         ).unsqueeze(0)
         return batch
 
+    def bimanual_relative(self, values: np.ndarray) -> np.ndarray:
+        """Keep shared UMI/IK decoding; the untrained hand holds its measured pose."""
+        values = np.asarray(values)
+        hand = getattr(self, "policy_hand", "both")
+        width = 20 if hand == "both" else 10
+        if values.ndim != 2 or values.shape[1] != width or not np.isfinite(values).all():
+            raise ValueError(f"Expected finite relative EEF actions of shape (time, {width}).")
+        if self.env_obs is None:
+            raise RuntimeError("Capture the relative EEF observation before decoding actions.")
+        if hand == "both":
+            return values
+        full = np.zeros((len(values), 20), dtype=values.dtype)
+        for side in range(2):
+            full[:, side * 10 + 3:side * 10 + 9] = [1, 0, 0, 0, 1, 0]
+            full[:, side * 10 + 9] = self.env_obs[f"robot{side}_gripper_width"][-1, 0]
+        start = 0 if hand == "left" else 10
+        full[:, start:start + 10] = values
+        return full
+
     def decode_action(self, chunk: np.ndarray) -> np.ndarray:
         """Restore TCP targets; DLS outputs only the arms and two grippers."""
-        if chunk.ndim != 2 or chunk.shape[1] != 20 or not np.isfinite(chunk).all():
-            raise ValueError(
-                "Expected finite relative EEF actions of shape (time, 20)."
-            )
-        if self.env_obs is None:
-            raise RuntimeError(
-                "Capture the relative EEF observation before decoding actions."
-            )
+        chunk = self.bimanual_relative(chunk)
         action = get_real_umi_action(chunk, self.env_obs, action_pose_repr="relative")
         lower, upper = self.transform.gripper_bounds[ACTION]
         grippers = denormalize(np.clip(action[:, [6, 13]], -1, 1), lower, upper)

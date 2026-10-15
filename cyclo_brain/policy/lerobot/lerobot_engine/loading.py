@@ -101,7 +101,7 @@ class LoadingMixin:
             # Older Cyclo images need only the model fields for inference;
             # the saved `state` is handled separately by the EEF bridge.
             supported = {field.name for field in fields(PolicyClass.config_class)}
-            for name in ("state", "gradient_checkpointing", "dtype"):
+            for name in ("state", "hand", "gradient_checkpointing", "dtype"):
                 if name not in supported:
                     saved_config.pop(name, None)
             policy_config = draccus.decode(PreTrainedConfig, saved_config)
@@ -155,9 +155,13 @@ class LoadingMixin:
             return
         if state != "relative":
             raise ValueError(f"Unsupported Diffusion state representation: {state!r}.")
+        hand = saved.get("hand", "both")
+        if hand not in {"both", "left", "right"}:
+            raise ValueError(f"Unsupported relative EEF hand: {hand!r}.")
+        width = 20 if hand == "both" else 10
         for key, features in (("observation.state", saved["input_features"]), ("action", saved["output_features"])):
-            if features[key]["shape"] != [20]:
-                raise ValueError(f"Relative EEF checkpoint requires a 20-dimensional {key}.")
+            if features[key]["shape"] != [width]:
+                raise ValueError(f"Relative EEF hand={hand} requires a {width}-dimensional {key}.")
         from .relative_eef import RelativeEEFAdapter
 
         self._relative_eef = RelativeEEFAdapter(

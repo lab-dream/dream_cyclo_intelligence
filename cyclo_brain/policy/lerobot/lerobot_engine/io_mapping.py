@@ -54,6 +54,12 @@ class IoMappingMixin:
         if selection not in {"both", "left", "right", "bimanual_right"}:
             raise ValueError("arm_selection must be both, left, right, or bimanual_right")
         adapter = self._relative_eef
+        hand = getattr(adapter, "policy_hand", "both")
+        if hand != "both":
+            if selection == "both":
+                selection = hand
+            if selection != hand:
+                raise ValueError(f"The hand={hand} checkpoint requires arm_selection={hand}.")
         if selection == "bimanual_right" and (adapter is None or adapter.ik_backend != "dls"):
             raise ValueError("bimanual_right requires a relative EEF Diffusion checkpoint with DLS IK")
         if adapter is not None and adapter.ik_backend == "dls" and selection in {"left", "right"}:
