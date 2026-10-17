@@ -48,7 +48,7 @@ def test_dynamic_inference_command_definition_matches_ros_service() -> None:
     dynamic_fields = _field_lines(_load_request_definition())
 
     assert dynamic_fields == service_fields
-    assert dynamic_fields[-9:] == [
+    assert dynamic_fields[-10:] == [
         "uint16 control_hz",
         "uint16 inference_hz",
         "float64 chunk_align_window_s",
@@ -58,4 +58,5 @@ def test_dynamic_inference_command_definition_matches_ros_service() -> None:
         "string ik_model_path",
         "string arm_selection",
         "string chunkrl_checkpoint",
+        "bool record_inference_mode",
     ]

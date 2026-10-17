@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from typing import Any
 
 from engine_process.protocol import (
@@ -32,8 +33,10 @@ class InferenceRequester:
         client: Any,
         get_action_timeout_s: float = 5.0,
         load_policy_timeout_s: float = DEFAULT_LOAD_POLICY_TIMEOUT_S,
+        event_logger=None,
     ) -> None:
         self._client = client
+        self.event_logger = event_logger
         self._get_action_timeout_s = float(get_action_timeout_s)
         self._load_policy_timeout_s = float(load_policy_timeout_s)
         self._seq_id = 0
@@ -45,9 +48,15 @@ class InferenceRequester:
             return self._get_action_in_flight
 
     def load_policy(self, request: Any, timeout_s: float | None = None) -> EngineCommandResponse:
+        session_id = uuid.uuid4().hex
+        recording = bool(getattr(request, "record_inference_mode", False))
+        if self.event_logger is not None:
+            self.event_logger.configure(recording, session_id)
         seq_id = self._next_seq_id()
         engine_request = EngineCommandRequest(
             command=CMD_LOAD_POLICY,
+            record_inference_mode=recording,
+            logging_session_id=session_id,
             seq_id=seq_id,
             model_path=str(getattr(request, "model_path", "") or ""),
             embodiment_tag=str(getattr(request, "embodiment_tag", "") or ""),
@@ -111,6 +120,15 @@ class InferenceRequester:
         return self._seq_id
 
     def _call(self, request: EngineCommandRequest, timeout_s: float) -> EngineCommandResponse:
+        if self.event_logger is not None:
+            self.event_logger.emit("request_started", seq_id=request.seq_id, command=request.command, timeout_s=timeout_s)
+        response = self._call_transport(request, timeout_s)
+        if self.event_logger is not None:
+            self.event_logger.emit("request_finished", seq_id=request.seq_id, command=request.command,
+                                   success=response.success, message=response.message)
+        return response
+
+    def _call_transport(self, request: EngineCommandRequest, timeout_s: float) -> EngineCommandResponse:
         try:
             response = self._client.call(request, timeout_s=timeout_s)
         except TimeoutError:

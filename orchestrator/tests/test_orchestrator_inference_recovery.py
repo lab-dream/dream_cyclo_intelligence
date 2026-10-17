@@ -224,3 +224,55 @@ def test_delayed_stale_resume_does_not_detach_replacement_client(monkeypatch):
     assert replacement_client.disconnect_calls == 0
     assert not replacement_client._cancelled.is_set()
     assert _FreshClient.instances == []
+
+
+def test_automatic_inference_logging_is_opt_in_and_refuses_busy_recorder():
+    node = _bare_node(None)
+    client = object()
+    node._start_automatic_inference_recording(client, SimpleNamespace(record_inference_mode=False))
+    node._recording_command_lock = threading.RLock()
+    node.on_recording = True
+    with pytest.raises(RuntimeError, match='Recorder is busy'):
+        node._start_automatic_inference_recording(client, SimpleNamespace(record_inference_mode=True))
+
+
+def test_automatic_log_ownership_is_kept_until_successful_save():
+    node = _bare_node(None)
+    node._recording_command_lock = threading.RLock()
+    node.on_recording = False
+    node._copy_task_info = lambda info: SimpleNamespace(**vars(info))
+    calls = []
+    success = True
+    def recording(command, **kwargs):
+        calls.append((command, kwargs))
+        if kwargs.get('task_info'):
+            kwargs['task_info'].task_num = 'recorder-normalized-id'
+        return SimpleNamespace(success=True, message='',
+            response=SimpleNamespace(success=success, message='disk full' if not success else 'saved'))
+    node._forward_recording = recording
+    client = object()
+    task = SimpleNamespace(record_inference_mode=True, task_num='gui-id')
+    node._start_automatic_inference_recording(client, task)
+    assert task.task_num == 'gui-id'
+    assert node.on_recording and node._automatic_inference_record_client is client
+    node._finish_automatic_inference_recording(object())  # a different session cannot close this bag
+    assert len(calls) == 1
+    success = False
+    node._finish_automatic_inference_recording(client)
+    assert node.on_recording and node._automatic_inference_record_client is client
+    success = True
+    node._finish_automatic_inference_recording(client)
+    assert not node.on_recording and node._automatic_inference_record_client is None
+
+
+def test_inference_recording_forwards_state_action_and_event_topics():
+    node = _bare_node(None)
+    node._recording_command_lock = threading.RLock()
+    node.params = {}
+    node.communicator = SimpleNamespace(get_mcap_topics=lambda: ['/joint_states', '/command'])
+    calls = []
+    node._cyclo_data = SimpleNamespace(send_recording_command=lambda **kw: calls.append(kw))
+    task = SimpleNamespace(task_type='inference', service_type='lerobot')
+    node._forward_recording(0, task_info=task, include_topics=True)
+    assert calls[0]['topics'] == ['/joint_states', '/command', '/lerobot/inference_events',
+                                  '/lerobot/inference_telemetry', '/inference/trajectory_preview']

@@ -33,6 +33,23 @@
 #include "rosbag_recorder/service_bag_recorder.hpp"
 
 
+namespace
+{
+// These publishers are owned by policy processes. Subscribe before their first
+// message even if ROS graph discovery lags behind the LOAD/START handshake.
+void add_inference_types(std::map<std::string, std::vector<std::string>> & types)
+{
+  for (const auto * backend : {"lerobot", "groot"}) {
+    types.emplace(std::string("/") + backend + "/inference_events",
+      std::vector<std::string>{"std_msgs/msg/String"});
+    types.emplace(std::string("/") + backend + "/inference_telemetry",
+      std::vector<std::string>{"std_msgs/msg/String"});
+  }
+  types.emplace("/inference/trajectory_preview",
+    std::vector<std::string>{"trajectory_msgs/msg/JointTrajectory"});
+}
+}  // namespace
+
 ServiceBagRecorder::ServiceBagRecorder()
 : rclcpp::Node("service_bag_recorder")
 {
@@ -193,6 +210,7 @@ void ServiceBagRecorder::handle_prepare(const std::vector<std::string> & topics)
   // (e.g. robot not running) are kept in the monitor list, but no
   // subscription can be created until they appear in the graph.
   auto names_and_types = this->get_topic_names_and_types();
+  add_inference_types(names_and_types);
   RCLCPP_INFO(this->get_logger(), "Found %zu active topics in system", names_and_types.size());
 
   auto missing_topics = get_missing_topics(names_and_types);
@@ -273,6 +291,7 @@ void ServiceBagRecorder::handle_start(const std::string & uri)
 
     // Re-resolve any topics that were missing during prepare.
     auto names_and_types = this->get_topic_names_and_types();
+    add_inference_types(names_and_types);
     {
       bool added_new = false;
       for (const auto & topic : topics_to_record_) {

@@ -454,3 +454,13 @@ def test_archive_writes_korean_subtask_instruction_as_utf8(tmp_path):
     raw = (out / "episode_info.json").read_text(encoding="utf-8")
     assert "화장품 집기" in raw
     assert "\\ud654" not in raw
+
+
+def test_inference_manifest_survives_segment_archival(tmp_path):
+    import json
+    segment = tmp_path / 'segments' / '0'
+    segment.mkdir(parents=True)
+    manifest = dict(schema_version=1, started_wall_time_ns=123, finished_wall_time_ns=456)
+    (segment / 'inference_log.json').write_text(json.dumps(manifest))
+    DataManager._copy_episode_sidecars([segment], tmp_path)
+    assert json.loads((tmp_path / 'inference_log.json').read_text()) == manifest

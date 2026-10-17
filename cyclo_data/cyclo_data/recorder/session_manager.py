@@ -1100,7 +1100,7 @@ class DataManager:
 
     @staticmethod
     def _copy_episode_sidecars(subtask_dirs: list[Path], out_dir: Path) -> None:
-        for name in ('robot.urdf',):
+        for name in ('robot.urdf', 'inference_log.json'):
             for seg_dir in subtask_dirs:
                 src = seg_dir / name
                 if src.exists():

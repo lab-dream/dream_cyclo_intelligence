@@ -256,3 +256,18 @@ describe('ChunkRL inference mode', () => {
     expect(screen.getByRole('button', { name: 'Use ChunkRL action requests' })).toBeDisabled();
   });
 });
+
+
+test('rosbag2 logging defaults off, syncs opt-in, and locks while inference runs', async () => {
+  jest.useFakeTimers();
+  const { store, sendRecordCommand } = renderPanel({ inferenceMode: 'robot' });
+  const checkbox = screen.getByRole('checkbox', { name: 'Record inference rosbag2' });
+  expect(checkbox).not.toBeChecked();
+  fireEvent.click(checkbox);
+  expect(store.getState().tasks.inferenceTaskInfo.recordInferenceMode).toBe(true);
+  await act(async () => { jest.runOnlyPendingTimers(); });
+  expect(sendRecordCommand).toHaveBeenCalledWith('set_task_info', { autofillEmptyTaskFields: false });
+  act(() => store.dispatch({ type: 'tasks/setInferenceStatus', payload: { inferencePhase: InferencePhase.INFERENCING } }));
+  expect(checkbox).toBeDisabled();
+  jest.useRealTimers();
+});

@@ -23,6 +23,21 @@ class ServiceHandler:
         self._response_factory = response_factory
 
     def handle(self, request):
+        logger = getattr(self._requester, "event_logger", None)
+        if logger is not None:
+            logger.emit("lifecycle_requested", command=int(request.command))
+            if int(request.command) in (CMD_START, CMD_RESUME):
+                logger.emit("session_config", config=getattr(self, "_logging_config", {}),
+                            publish_to_robot=bool(getattr(request, "publish_to_robot", False)))
+        response = self._dispatch(request)
+        if logger is not None:
+            logger.emit("lifecycle_finished", command=int(request.command),
+                        success=response.success, message=response.message)
+            if int(request.command) == CMD_UNLOAD and response.success:
+                logger.configure(False)
+        return response
+
+    def _dispatch(self, request):
         cmd = int(request.command)
         try:
             if cmd == CMD_LOAD:
@@ -51,6 +66,10 @@ class ServiceHandler:
         if not request.robot_type:
             return self._make_response(False, "robot_type is required")
 
+        self._logging_config = {key: getattr(request, key, None) for key in (
+            "model_path", "robot_type", "task_instruction", "action_request_mode",
+            "control_hz", "inference_hz", "ik_backend", "arm_selection", "chunkrl_checkpoint",
+            "initial_pose_sync", "initial_pose_sync_duration_s", "chunk_align_window_s")}
         response = self._requester.load_policy(request)
         if not response.success:
             return self._make_response(False, response.message)

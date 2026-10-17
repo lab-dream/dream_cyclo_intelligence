@@ -5,6 +5,8 @@ string[] task_instruction
 string[] subtask_instruction
 string policy_path
 string[] tags
+# Live inference: start dataset rosbag2 recording before START and save on Clear.
+# Includes opt-in timestamped policy/control events; default false.
 bool record_inference_mode
 uint16 control_hz
 uint16 inference_hz

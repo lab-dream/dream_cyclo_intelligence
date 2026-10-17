@@ -463,6 +463,20 @@ const InferencePanel = () => {
         </div>
       </div>
 
+      <div className="mb-3 rounded-md border border-gray-200 p-2.5 text-sm">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" aria-label="Record inference rosbag2"
+            checked={Boolean(info.recordInferenceMode)} disabled={!isEditable}
+            onChange={(e) => handleChange('recordInferenceMode', e.target.checked)} />
+          <span>Record inference · rosbag2</span>
+        </label>
+        <p className="mt-1 text-xs text-gray-500">
+          Save observations, actions, request/stage timestamps and command gaps.
+          Recording continues during Pause; Clear saves the session.
+        </p>
+        <p className="mt-1 break-all text-xs text-gray-500">/workspace/rosbag2/Task_…_inference_MCAP/</p>
+      </div>
+
       {/* Edit mode indicator */}
       <div
         className={clsx('mb-3', 'p-2', 'rounded-md', 'text-sm', 'font-medium', {

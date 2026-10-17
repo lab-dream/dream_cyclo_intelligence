@@ -30,8 +30,10 @@ Session-state boundary (REVIEW §9.3):
   flags before invoking us and after our response returns.
 """
 
+import json
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -645,6 +647,7 @@ class RecordingService:
             if self._camera_info is not None:
                 self._camera_info.start_episode(episode_dir)
 
+            self._write_inference_manifest(episode_dir, request.task_info, topics, request.robot_type)
             dm.start_recording()
             dm_started = True
         except Exception as exc:  # noqa: BLE001
@@ -666,8 +669,30 @@ class RecordingService:
             f'Recording started at {rosbag_path}')
 
         response.success = True
-        response.message = 'Recording started'
+        response.message = f'Recording started: {rosbag_path}'
         return response
+
+    @staticmethod
+    def _write_inference_manifest(episode_dir, task_info, topics, robot_type=""):
+        if getattr(task_info, 'task_type', '') != 'inference':
+            return
+        fields = ('policy_path', 'service_type', 'task_instruction',
+            'inference_mode', 'action_request_mode', 'arm_selection', 'ik_backend',
+            'control_hz', 'inference_hz', 'chunk_align_window_s', 'chunkrl_checkpoint')
+        try:
+            clock_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        except OSError:
+            clock_id = ''
+        manifest = dict(schema_version=1, robot_type=robot_type, clock_id=clock_id,
+            started_wall_time_ns=time.time_ns(),
+            started_monotonic_ns=time.monotonic_ns(), topics=topics,
+            config={key: getattr(task_info, key, None) for key in fields},
+            events='/<backend>/inference_events (std_msgs/msg/String JSON)',
+            images='videos/ with frame timestamps, same as dataset recording v2',
+            clocks='wall_time_ns: Unix epoch; monotonic_ns: compare only with matching clock_id',
+            idle_analysis='control_state=buffer_empty is command starvation, not proof of physical rest; compare actual joint feedback')
+        (Path(episode_dir) / 'inference_log.json').write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False), encoding='utf-8')
 
     def _cleanup_failed_start(
         self,
@@ -845,6 +870,11 @@ class RecordingService:
         episode_dir = Path(self._data_manager.get_save_rosbag_path() or '')
         self._rosbag.stop_rosbag()
         self._stop_episode_writers()
+        manifest_path = episode_dir / 'inference_log.json'
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            manifest.update(finished_wall_time_ns=time.time_ns(), finished_monotonic_ns=time.monotonic_ns())
+            manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding='utf-8')
 
         self._data_manager.save_robotis_metadata(
             urdf_path=getattr(request, 'urdf_path', '') or '',

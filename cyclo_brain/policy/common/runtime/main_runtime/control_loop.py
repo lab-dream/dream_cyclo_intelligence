@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+from inference_logging import clock_stamp
 
 
 _parents = Path(__file__).resolve().parents
@@ -86,7 +87,12 @@ class ControlLoop:
         max_refill_latency_s: Optional[float] = 2.0,
         action_request_mode: str = ACTION_REQUEST_MODE_ASYNC,
         telemetry_callback=None,
+        event_logger=None,
     ) -> None:
+        self._event_logger = event_logger
+        self._command_index = 0
+        self._latest_buffer_seq_id = None
+        self._last_control_state = None
         self._requester = requester
         self._telemetry_callback = telemetry_callback
         self._default_inference_hz = positive_finite_or_default(inference_hz, 15.0)
@@ -261,6 +267,7 @@ class ControlLoop:
                 and not self._initial_pose_sync_completed
             )
             self._chunkrl_reset_pending = True
+            self._last_control_state = None
             if not should_sync:
                 self._running = True
                 return False
@@ -305,6 +312,8 @@ class ControlLoop:
                 self._initial_pose_sync_in_progress = False
                 self._initial_pose_sync_deadline = None
                 raise
+            self._event("initial_pose_target", seq_id=getattr(response, "seq_id", None),
+                        values=chunk[0].tolist(), action_keys=action_keys, duration_s=duration_s)
             self._initial_pose_sync_in_progress = True
             self._initial_pose_sync_deadline = time.monotonic() + duration_s
             self._running = True
@@ -341,11 +350,14 @@ class ControlLoop:
             else:
                 self._initial_pose_sync_in_progress = False
                 self._initial_pose_sync_hold_pending = False
+        self._event("control_state", state="paused", generation=self._generation)
         if robot is not None:
             try:
                 robot.publish_current_pose_hold(action_keys, duration_s=0.1)
+                self._event("pose_hold_published", action_keys=action_keys, duration_s=0.1)
                 logger.info("initial pose sync interrupted; current pose hold published")
             except Exception as e:
+                self._event("pose_hold_failed", error=str(e), action_keys=action_keys)
                 with self._lock:
                     if robot is self._robot:
                         self._initial_pose_sync_in_progress = True
@@ -434,14 +446,19 @@ class ControlLoop:
                                     "failed to publish idle action during pose sync: %s",
                                     e,
                                 )
+                    self._record_control("initial_pose_sync", None, False, "")
                     return
                 self._initial_pose_sync_in_progress = False
                 self._initial_pose_sync_completed = True
                 self._initial_pose_sync_deadline = None
+                self._event("initial_pose_sync_finished")
                 logger.info(
                     "initial pose sync complete; requesting a fresh action chunk"
                 )
 
+            command_started = clock_stamp()
+            command_published = False
+            command_error = ""
             action = processor.pop_action()
             if action is not None:
                 preview = getattr(robot, "publish_action_preview", None)
@@ -453,7 +470,9 @@ class ControlLoop:
                 if publish_to_robot:
                     try:
                         robot.publish_action(action, action_keys)
+                        command_published = True
                     except Exception as e:
+                        command_error = str(e)
                         logger.error("failed to publish robot action: %s", e)
             elif publish_to_robot:
                 idle = getattr(robot, "publish_idle_action", None)
@@ -461,8 +480,11 @@ class ControlLoop:
                     try:
                         idle(action_keys)
                     except Exception as e:
+                        command_error = str(e)
                         logger.error("failed to publish idle robot action: %s", e)
 
+            self._record_control("executing" if action is not None else "buffer_empty",
+                                 action, command_published, command_error, started=command_started)
             should_request = self._should_request_actions(processor)
 
         if should_request:
@@ -501,6 +523,7 @@ class ControlLoop:
         latency_s = time.monotonic() - started_at
         self._record_request_latency(latency_s)
         buffer_started = time.monotonic()
+        self._event("buffer_started", seq_id=getattr(response, "seq_id", None), generation=generation)
         try:
             chunk = self._decode_action_response(response)
             if action_request_mode == ACTION_REQUEST_MODE_CHUNKRL and len(chunk) != 1:
@@ -509,57 +532,92 @@ class ControlLoop:
             with self._lock:
                 if generation == self._generation:
                     self._chunkrl_reset_pending = True
+            self._event("buffer_finished", seq_id=getattr(response, "seq_id", None),
+                        generation=generation, accepted=False, reason=str(e))
             logger.warning("get_action response rejected: %s", e)
             if generation == self._generation:
                 self._emit_telemetry(response, latency_s, accepted=False, error=str(e), mode=action_request_mode)
             return
         buffered = False
-        with self._lock:
-            if (
-                generation == self._generation
-                and self._running
-                and self._processor is not None
-            ):
-                buffer_delay_s = self._processor.buffer_size / max(
-                    1.0,
-                    self._processor.output_hz,
-                )
-
-                scheduled_start_delay_s = (
-                    None
-                    if action_request_mode in {ACTION_REQUEST_MODE_SYNC, ACTION_REQUEST_MODE_CHUNKRL}
-                    else latency_s + buffer_delay_s
-                )
-                if action_request_mode == ACTION_REQUEST_MODE_CHUNKRL:
-                    produced = self._processor.push_waypoint(chunk[0])
-                    self._chunkrl_reset_pending = False
-                else:
-                    produced = self._processor.push_actions(
-                        chunk,
-                        scheduled_start_delay_s=scheduled_start_delay_s,
-                        align=action_request_mode != ACTION_REQUEST_MODE_SYNC,
+        try:
+            with self._lock:
+                if (
+                    generation == self._generation
+                    and self._running
+                    and self._processor is not None
+                ):
+                    buffer_delay_s = self._processor.buffer_size / max(
+                        1.0,
+                        self._processor.output_hz,
                     )
-                buffered = True
-                scheduled_start_text = (
-                    "none"
-                    if scheduled_start_delay_s is None
-                    else f"{scheduled_start_delay_s:.3f}s"
-                )
-                logger.debug(
-                    "buffered action chunk: source=%d produced=%d "
-                    "mode=%s latency=%.3fs buffer_delay=%.3fs "
-                    "scheduled_start=%s",
-                    response.chunk_size,
-                    produced,
-                    action_request_mode,
-                    latency_s,
-                    buffer_delay_s,
-                    scheduled_start_text,
-                )
+
+                    scheduled_start_delay_s = (
+                        None
+                        if action_request_mode in {ACTION_REQUEST_MODE_SYNC, ACTION_REQUEST_MODE_CHUNKRL}
+                        else latency_s + buffer_delay_s
+                    )
+                    if action_request_mode == ACTION_REQUEST_MODE_CHUNKRL:
+                        produced = self._processor.push_waypoint(chunk[0])
+                        self._chunkrl_reset_pending = False
+                    else:
+                        produced = self._processor.push_actions(
+                            chunk,
+                            scheduled_start_delay_s=scheduled_start_delay_s,
+                            align=action_request_mode != ACTION_REQUEST_MODE_SYNC,
+                        )
+                    buffered = True
+                    self._latest_buffer_seq_id = getattr(response, "seq_id", None)
+                    scheduled_start_text = (
+                        "none"
+                        if scheduled_start_delay_s is None
+                        else f"{scheduled_start_delay_s:.3f}s"
+                    )
+                    logger.debug(
+                        "buffered action chunk: source=%d produced=%d "
+                        "mode=%s latency=%.3fs buffer_delay=%.3fs "
+                        "scheduled_start=%s",
+                        response.chunk_size,
+                        produced,
+                        action_request_mode,
+                        latency_s,
+                        buffer_delay_s,
+                        scheduled_start_text,
+                    )
+        except Exception as e:
+            self._event("buffer_finished", seq_id=getattr(response, "seq_id", None),
+                        generation=generation, accepted=False, reason=str(e))
+            logger.warning("action buffering failed: %s", e)
+            if generation == self._generation:
+                self._chunkrl_reset_pending = True
+                self._emit_telemetry(response, latency_s, accepted=False, error=str(e), mode=action_request_mode)
+            return
+        with self._lock:
+            self._event("buffer_finished", seq_id=getattr(response, "seq_id", None), generation=generation,
+                        accepted=buffered, reason="" if buffered else "stale_or_stopped",
+                        buffer_size=self._processor.buffer_size if self._processor is not None else 0)
         if buffered:
             self._emit_telemetry(response, latency_s,
                                  buffer_ms=(time.monotonic() - buffer_started) * 1000,
                                  mode=action_request_mode)
+
+    def _event(self, event, **fields):
+        if self._event_logger is not None:
+            self._event_logger.emit(event, **fields)
+
+    def _record_control(self, state, action, published, error, **fields):
+        logger = self._event_logger
+        if logger is None or not logger.enabled:
+            return
+        self._command_index += 1
+        if state != self._last_control_state:
+            self._event("control_state", state=state, generation=self._generation)
+            self._last_control_state = state
+        self._event("control_tick", state=state, command_index=self._command_index,
+            generation=self._generation, latest_buffer_seq_id=self._latest_buffer_seq_id,
+            buffer_size=self._processor.buffer_size if self._processor is not None else 0,
+            publish_to_robot=self._publish_to_robot, command_published=published, error=error,
+            action_keys=self._action_keys, values=action.tolist() if action is not None else None,
+            **fields)
 
     def _emit_telemetry(self, response, request_s, *, buffer_ms=0.0, accepted=True, error="", mode=""):
         callback = getattr(self, "_telemetry_callback", None)

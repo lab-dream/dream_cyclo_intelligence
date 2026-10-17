@@ -544,3 +544,18 @@ def test_cancel_segment_rejects_when_no_active_recording():
     assert result is response
     assert response.success is False
     assert response.message == "CANCEL_SEGMENT: no active recording"
+
+
+def test_inference_manifest_preserves_policy_configuration_and_clock_units(tmp_path):
+    import json
+    task = SimpleNamespace(task_type='inference', policy_path='/model/checkpoint',
+        service_type='lerobot', action_request_mode='chunkrl', inference_hz=30,
+        control_hz=100, arm_selection='right', ik_backend='dls')
+    RecordingService._write_inference_manifest(tmp_path, task, ['/joint_states', '/lerobot/inference_events'])
+    value = json.loads((tmp_path / 'inference_log.json').read_text())
+    assert value['config']['policy_path'] == '/model/checkpoint'
+    assert value['config']['arm_selection'] == 'right'
+    assert value['started_wall_time_ns'] > 10**18
+    assert value['started_monotonic_ns'] > 0
+    assert '/joint_states' in value['topics']
+    assert 'not proof of physical rest' in value['idle_analysis']

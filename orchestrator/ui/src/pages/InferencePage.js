@@ -48,6 +48,8 @@ export default function InferencePage({ isActive = true }) {
   const robotType = useSelector((state) => state.tasks.robotType);
   const joystickMode = useSelector((state) => state.tasks.joystickMode);
   const taskInfo = useSelector(selectInferenceTaskInfo, shallowEqual);
+  const logPath = useSelector((state) => state.tasks.recordStatus.inferenceLogPath);
+  const logActive = useSelector((state) => state.tasks.recordStatus.inferenceLogActive);
   const telemetry = useInferenceTelemetry(taskInfo.serviceType, robotType, isActive);
 
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
@@ -196,6 +198,11 @@ export default function InferencePage({ isActive = true }) {
               </div>
               {!datasetSimulation && <div className="shrink-0"><InferenceControlPanel /></div>}
             </div>
+            {!datasetSimulation && logPath && <div role="status" aria-label="Inference log status"
+              className="absolute top-[4.5rem] right-4 z-10 max-w-[70%] rounded bg-white/90 px-2 py-1 text-xs truncate"
+              title={logPath}>
+              {logActive ? '● Recording rosbag2' : 'Last inference log'}: {logPath}
+            </div>}
             <div className={classHeartbeatStatus}>
               <HeartbeatStatus />
             </div>

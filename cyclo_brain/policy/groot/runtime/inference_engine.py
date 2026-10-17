@@ -722,12 +722,14 @@ class GR00TInference:
             return self.fail("Not in inference mode")
 
         from inference_telemetry import InferenceTrace
+        from inference_logging import log_values
         trace = InferenceTrace()
         try:
             with trace.stage("observation"):
                 images = self.robot.get_images(format="rgb")
                 joints = self.robot.get_joint_positions()
                 task = request.task_instruction
+            log_values("observation_state", joints, representation="joint_positions")
             with trace.stage("preprocess"):
                 observation = self.preprocess(images, joints, task)
             if "success" in observation:
@@ -737,6 +739,7 @@ class GR00TInference:
             self.logger.info("Running GR00T inference...")
             with trace.stage("policy"):
                 action, info = self.policy.get_action(observation)
+            log_values("policy_action", action, representation="policy_output")
             self.logger.info("GR00T inference completed in %.3fs", time.monotonic() - t0)
             with trace.stage("postprocess"):
                 return self.postprocess_action(action)

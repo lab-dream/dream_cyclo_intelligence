@@ -386,6 +386,7 @@ class ContainerServiceClient:
         ik_model_path: str = "",
         chunkrl_checkpoint: str = "",
         arm_selection: str = "right",
+        record_inference_mode: bool = False,
     ) -> ServiceResponse:
         """Call /{prefix}/inference_command (InferenceCommand.srv).
 
@@ -416,6 +417,7 @@ class ContainerServiceClient:
         request.ik_model_path = str(ik_model_path or "")
         request.arm_selection = str(arm_selection or "right")
         request.chunkrl_checkpoint = str(chunkrl_checkpoint or "")
+        request.record_inference_mode = bool(record_inference_mode)
         if hasattr(request, "publish_to_robot"):
             request.publish_to_robot = bool(publish_to_robot)
         if hasattr(request, "action_request_mode"):

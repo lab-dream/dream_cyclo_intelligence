@@ -36,6 +36,8 @@ string action_request_mode
 string chunkrl_checkpoint
 # Reset state on start/resume, discarded startup target, or failed request.
 bool reset_policy_state
+bool record_inference_mode
+string logging_session_id
 ---
 uint64 seq_id
 bool success

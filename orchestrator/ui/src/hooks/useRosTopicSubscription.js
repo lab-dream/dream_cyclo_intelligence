@@ -309,6 +309,10 @@ export function useRosTopicSubscription() {
           dispatch(
             setRecordStatus({
               taskName: msg.task_info?.task_name || 'idle',
+              inferenceLogActive: msg.task_info?.task_type === 'inference' && msg.record_phase === 1,
+              ...(msg.task_info?.task_type === 'inference' && msg.record_phase === 1 ? {
+                inferenceLogPath: `/workspace/rosbag2/Task_${msg.task_info.task_num}_inference_MCAP/${msg.current_episode_number}`,
+              } : {}),
               running: isRunning,
               recordPhase: currentPhase || 0,
               progress: Math.round(encodingProgress),

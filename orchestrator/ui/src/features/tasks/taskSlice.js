@@ -338,6 +338,8 @@ const initialState = {
   // record-session state.
   recordStatus: {
     taskName: 'idle',
+    inferenceLogPath: '',
+    inferenceLogActive: false,
     running: false,
     recordPhase: RecordPhase.READY,
     progress: 0,

@@ -74,6 +74,7 @@ string ik_backend
 string ik_model_path
 string arm_selection
 string chunkrl_checkpoint
+bool record_inference_mode
 """
 
 INFERENCE_COMMAND_RESPONSE_DEF = """\
@@ -102,6 +103,8 @@ string arm_selection
 string action_request_mode
 string chunkrl_checkpoint
 bool reset_policy_state
+bool record_inference_mode
+string logging_session_id
 """
 
 ENGINE_COMMAND_RESPONSE_DEF = """\
@@ -113,6 +116,7 @@ int32 chunk_size
 int32 action_dim
 float64[] action_list
 string simulation_state
+string telemetry
 """
 
 # --- StopTraining (interfaces/srv/StopTraining.srv) ---

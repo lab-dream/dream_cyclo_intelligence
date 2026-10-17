@@ -49,6 +49,8 @@ string arm_selection
 string action_request_mode
 string chunkrl_checkpoint
 bool reset_policy_state
+bool record_inference_mode
+string logging_session_id
 """
 
 ENGINE_COMMAND_RESPONSE_DEF = """\
@@ -82,6 +84,8 @@ class EngineCommandRequest:
     action_request_mode: str = ""
     chunkrl_checkpoint: str = ""
     reset_policy_state: bool = False
+    record_inference_mode: bool = False
+    logging_session_id: str = ""
 
 
 @dataclass
@@ -118,6 +122,8 @@ def request_from_message(message: Any) -> EngineCommandRequest:
         action_request_mode=str(getattr(message, "action_request_mode", "") or ""),
         chunkrl_checkpoint=str(getattr(message, "chunkrl_checkpoint", "") or ""),
         reset_policy_state=bool(getattr(message, "reset_policy_state", False)),
+        record_inference_mode=bool(getattr(message, "record_inference_mode", False)),
+        logging_session_id=str(getattr(message, "logging_session_id", "") or ""),
     )
 
 
@@ -172,6 +178,8 @@ def request_to_message_kwargs(request: EngineCommandRequest) -> dict:
         "action_request_mode": str(request.action_request_mode),
         "chunkrl_checkpoint": str(request.chunkrl_checkpoint),
         "reset_policy_state": bool(request.reset_policy_state),
+        "record_inference_mode": bool(request.record_inference_mode),
+        "logging_session_id": str(request.logging_session_id),
     }
 
 

@@ -83,6 +83,7 @@ from engine import InferenceEngine  # noqa: E402
 
 import torch  # noqa: E402
 from inference_telemetry import InferenceTrace
+from inference_logging import log_values
 
 from robot_client import RobotClient  # noqa: E402
 from lerobot.policies.pretrained import PreTrainedPolicy  # noqa: E402
@@ -239,6 +240,7 @@ class LeRobotEngine(
             manager.reset()
         snapshot = manager.snapshot() if manager is not None else None
         trace = InferenceTrace()
+        config = getattr(self._policy, "config", None)
         preview = None
         try:
             with trace.stage("observation"):
@@ -248,6 +250,12 @@ class LeRobotEngine(
             if "success" in obs:
                 return obs
 
+            log_values("observation_state", obs.get("observation.state"),
+                       observation_window=getattr(self, "_observation_window", None),
+                       policy_state=str(getattr(config, "state", "absolute")),
+                       hand=str(getattr(config, "hand", "both")),
+                       image_shapes={key: list(value.shape) for key, value in obs.items()
+                                     if key.startswith("observation.images.") and hasattr(value, "shape")})
             with torch.inference_mode():
                 with trace.stage("preprocess"):
                     preprocessed = self._preprocessor(obs)
@@ -256,6 +264,9 @@ class LeRobotEngine(
                 with trace.stage("postprocess"):
                     action = self._postprocessor(action)
                     chunk = self._to_numpy_chunk(action)
+                    log_values("policy_action", chunk, representation="policy_output_after_denormalization",
+                               hand=str(getattr(config, "hand", "both")),
+                               policy_state=str(getattr(config, "state", "absolute")))
                     if manager is not None:
                         with trace.stage("chunkrl"):
                             chunk = manager.select(chunk, self._relative_eef.env_obs)

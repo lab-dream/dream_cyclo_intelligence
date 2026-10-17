@@ -19,6 +19,7 @@ import torch
 
 from .constants import STATE_KEY as _STATE_KEY
 from .image_preprocessing import prepare_policy_image
+from inference_logging import log_values
 
 
 logger = logging.getLogger("lerobot_engine")
@@ -75,6 +76,7 @@ class PreprocessingMixin:
         if not joint_dict:
             return self._fail("No joint positions available")
 
+        log_values("observation_joints", joint_dict, representation="joint_positions")
         batch: Dict[str, Any] = {}
 
         for cam_name, policy_key in self._cameras.items():

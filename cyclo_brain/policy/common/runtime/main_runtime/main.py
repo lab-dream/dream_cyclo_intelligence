@@ -44,6 +44,7 @@ from .service_handler import ServiceHandler  # noqa: E402
 from .session_state import SessionState  # noqa: E402
 from .zenoh_client import ZenohEngineCommandClient  # noqa: E402
 from inference_telemetry import TelemetryPublisher
+from inference_logging import InferenceEventPublisher
 
 
 logger = get_logger("main_runtime")
@@ -73,8 +74,11 @@ class MainRuntime:
             node_name=f"{backend}_engine_client",
             namespace=namespace,
         )
+        self._event_logger = InferenceEventPublisher(backend, "main", router_ip=router_ip,
+            router_port=router_port, domain_id=domain_id)
         self._requester = InferenceRequester(
             engine_client,
+            event_logger=self._event_logger,
             get_action_timeout_s=float(os.environ.get("GET_ACTION_TIMEOUT_S", "5.0")),
             load_policy_timeout_s=float(
                 os.environ.get(
@@ -103,6 +107,7 @@ class MainRuntime:
             ),
             action_request_mode=os.environ.get("ACTION_REQUEST_MODE", "async"),
             telemetry_callback=self._telemetry_publisher.publish,
+            event_logger=self._event_logger,
         )
         self._engine_client = engine_client
         self._command_srv = None
@@ -174,6 +179,7 @@ class MainRuntime:
                 pass
             self._command_srv = None
         self._engine_client.close()
+        self._event_logger.close()
 
     @staticmethod
     def _bool_env(name: str, default: bool) -> bool:

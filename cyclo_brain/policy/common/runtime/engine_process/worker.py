@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
+from inference_logging import InferenceEventPublisher, set_engine_logger, _request_id, clock_stamp
 from typing import Any
 
 _ZENOH_SDK_PATH = os.environ.get("ZENOH_SDK_PATH", "/zenoh_sdk")
@@ -69,8 +70,39 @@ class EngineWorker:
         self._shutdown = threading.Event()
         self._command_lock = threading.RLock()
         self._telemetry_publisher = None
+        self._event_publisher = None
 
     def handle(self, request: Any) -> EngineCommandResponse:
+        received_at = clock_stamp()
+        with self._command_lock:
+            event_logger = self._event_publisher
+            if event_logger is not None and int(request.command) in (CMD_LOAD_POLICY, CMD_LOAD_DATASET_SIMULATION):
+                event_logger.configure(getattr(request, "record_inference_mode", False),
+                                       getattr(request, "logging_session_id", ""))
+            set_engine_logger(event_logger)
+            token = _request_id.set(int(getattr(request, "seq_id", 0)))
+            response = None
+            if event_logger is not None:
+                event_logger.emit("engine_request_started", seq_id=request.seq_id, command=int(request.command),
+                                  received=received_at)
+            try:
+                response = self._handle_command(request)
+                if event_logger is not None and event_logger.enabled:
+                    if response.success and int(request.command) == CMD_GET_ACTION:
+                        event_logger.emit("action_chunk", seq_id=response.seq_id,
+                            chunk_size=response.chunk_size, action_dim=response.action_dim,
+                            action_keys=list(getattr(self._engine, "_action_keys", [])),
+                            values=list(response.action_list))
+                    event_logger.emit("engine_request_finished", seq_id=response.seq_id,
+                        command=int(request.command), success=response.success, message=response.message,
+                        telemetry=json.loads(response.telemetry or "{}"))
+                return response
+            finally:
+                _request_id.reset(token)
+                if event_logger is not None and int(request.command) in (CMD_UNLOAD_POLICY, CMD_UNLOAD_DATASET_SIMULATION):
+                    event_logger.configure(False)
+
+    def _handle_command(self, request: Any) -> EngineCommandResponse:
         with self._command_lock:
             started = time.perf_counter()
             command = int(getattr(request, "command", 0))
@@ -186,6 +218,8 @@ class EngineWorker:
         if ROS2ServiceServer is None:
             raise RuntimeError("zenoh_ros2_sdk.ROS2ServiceServer is unavailable")
         from inference_telemetry import TelemetryPublisher
+        self._event_publisher = InferenceEventPublisher(service_name.strip("/").split("/")[0], "engine",
+            router_ip=router_ip, router_port=router_port, domain_id=domain_id)
         self._telemetry_publisher = TelemetryPublisher(service_name.strip("/").split("/")[0],
             router_ip=router_ip, router_port=router_port, domain_id=domain_id)
         self._service = ROS2ServiceServer(
@@ -207,6 +241,8 @@ class EngineWorker:
 
     def shutdown(self) -> None:
         self._shutdown.set()
+        if self._event_publisher is not None:
+            self._event_publisher.close()
         if self._telemetry_publisher is not None:
             self._telemetry_publisher.close()
             self._telemetry_publisher = None

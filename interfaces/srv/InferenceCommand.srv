@@ -61,6 +61,7 @@ string ik_model_path
 string arm_selection
 # Per-arm decider checkpoint, used only with action_request_mode=chunkrl.
 string chunkrl_checkpoint
+bool record_inference_mode
 ---
 bool success
 string message
