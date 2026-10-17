@@ -47,6 +47,13 @@ and total durations, including warm-up samples and errors. Postprocessing
 includes the separately displayed IK/ChunkRL times. GR00T uses the same timing
 transport; EEF overlays are provided for relative EEF policies.
 
+Live Diffusion observations use receive-timestamped rings for the policy cameras
+and robot state. LOAD warms up the history; inference selects a fixed window at
+the configured Dataset FPS without waiting for another frame. Missing, stale,
+or misaligned history is rejected. The relative TCP anchor uses the latest state
+in that same snapshot. Sampling age and alignment diagnostics accompany timing
+telemetry; dataset feedback continues to use its recorded frame history.
+
 Cyclo Intelligence is a Physical AI platform for data recording, dataset
 conversion, policy training, inference, and robot execution with AI Worker.
 For detailed usage instructions, please refer to the documentation below.

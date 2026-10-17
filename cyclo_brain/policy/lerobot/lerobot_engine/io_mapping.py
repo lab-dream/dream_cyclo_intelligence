@@ -170,6 +170,13 @@ class IoMappingMixin:
         self._state_modalities = modalities
         self._action_keys = list(modalities)
 
+        if robot is None and self._policy.config.type == "diffusion":
+            self._robot.enable_observation_history(
+                self._cameras, horizon_s=max(0.5, 2 * self._policy.config.n_obs_steps * self._observation_interval_s))
+            # LOAD warms up the selected streams after relative/joint state
+            # configuration is resolved. Unused cameras/odom need not be ready.
+            return
+
         # Block until at least one frame from each sensor lands. 10 s is
         # generous — typical hardware comes up in <2 s.
         self._robot.wait_for_ready(timeout=10.0)

@@ -12,7 +12,6 @@ Builds a policy-ready batch from RobotClient sensor/state reads.
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any, Dict, List
 
 import numpy as np
@@ -29,23 +28,26 @@ class PreprocessingMixin:
     """RobotClient observation -> policy input batch."""
 
     def _build_policy_observation(self, task_instruction: str) -> Dict[str, Any]:
-        """Capture Diffusion's observation window at the dataset frame rate."""
+        """Select a timestamp-aligned Diffusion window without waiting for frames."""
+        self._observation_window = None
         config = self._policy.config
         if getattr(self, "_dataset_simulation", None) is not None:
             return self._dataset_simulation.build_observation(self, task_instruction)
         if getattr(config, "type", None) != "diffusion":
             return self._build_observation(task_instruction)
 
+        try:
+            snapshots, self._observation_window = self._robot.get_observation_window(
+                config.n_obs_steps, self._observation_interval_s,
+                sensor_names=self._observation_sensor_names())
+        except ValueError as exc:
+            return self._fail(str(exc))
         observations = []
-        for index in range(config.n_obs_steps):
-            if index:
-                time.sleep(max(0.0, deadline - time.monotonic()))
-            captured_at = time.monotonic()
-            observation = self._build_observation(task_instruction)
+        for snapshot in snapshots:
+            observation = self._build_observation(task_instruction, snapshot=snapshot)
             if "success" in observation:
                 return observation
             observations.append(observation)
-            deadline = captured_at + self._observation_interval_s
 
         batch = dict(observations[-1])
         for key in config.input_features:
@@ -54,11 +56,14 @@ class PreprocessingMixin:
             batch = self._relative_eef.encode_observation(batch)
         return batch
 
-    def _build_observation(self, task_instruction: str) -> Dict[str, Any]:
+    def _observation_sensor_names(self):
+        return ("odom",) if self._relative_eef is None and "mobile" in self._state_modalities else ()
+
+    def _build_observation(self, task_instruction: str, snapshot=None) -> Dict[str, Any]:
         """Pull raw sensor data from RobotClient and build a policy batch."""
         assert self._robot is not None
 
-        images = self._robot.get_images(format="rgb")
+        images = self._robot.get_images(format="rgb") if snapshot is None else snapshot["images"]
         if not images:
             return self._fail("No camera frames available")
 
@@ -66,7 +71,7 @@ class PreprocessingMixin:
         if adapter is not None and adapter.ik_backend == "nodeik":
             adapter.kinematics.set_images(images, self._robot._config.get("cameras", {}))
 
-        joint_dict = self._robot.get_joint_positions()
+        joint_dict = self._robot.get_joint_positions() if snapshot is None else snapshot["joints"]
         if not joint_dict:
             return self._fail("No joint positions available")
 
@@ -99,7 +104,7 @@ class PreprocessingMixin:
         state_parts: List[np.ndarray] = []
         for modality in self._state_modalities:
             if modality == "mobile":
-                odom = self._robot.get_odom()
+                odom = self._robot.get_odom() if snapshot is None else snapshot["sensors"].get("odom")
                 if odom is None:
                     return self._fail("Missing odom for mobile state")
                 state_parts.append(

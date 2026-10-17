@@ -28,6 +28,8 @@ import time
 import threading
 import logging
 import math
+from bisect import bisect_left
+from collections import deque
 from pathlib import Path
 from typing import Optional, Union
 
@@ -210,6 +212,7 @@ class RobotClient:
         self._joint_position_timestamps_by_name: dict[str, float] = {}
         self._sensors: dict[str, dict] = {}
         self._sensor_timestamps: dict[str, float] = {}
+        self._observation_history = None
         self._task_instruction: str = ""
 
         self._subscribers: list = []
@@ -376,6 +379,7 @@ class RobotClient:
     def _update_image(self, cam_name: str, msg):
         """CompressedImage -> BGR numpy array."""
         try:
+            received_at = time.monotonic()
             data = msg.data
             if isinstance(data, (list, tuple)):
                 data = bytes(data)
@@ -385,6 +389,7 @@ class RobotClient:
                 with self._lock:
                     self._images[cam_name] = img
                     self._image_timestamps[cam_name] = time.time()
+                    self._append_observation("image", cam_name, received_at, img)
         except Exception as e:
             logger.warning(f"Failed to decode image from {cam_name}: {e}")
 
@@ -441,12 +446,17 @@ class RobotClient:
                         self._joint_timestamps[view] = now
                     else:
                         self._joint_timestamps.pop(view, None)
+                self._append_observation("joint", group_name, received_monotonic, {
+                    view: self._joint_positions[view]
+                    for view in [group_name, *children] if view in self._joint_positions
+                })
         except Exception as e:
             logger.warning(f"Failed to parse joint from {group_name}: {e}")
 
     def _update_sensor(self, sensor_name: str, msg):
         """Parse sensor messages (Odometry, Twist, etc.)."""
         try:
+            received_at = time.monotonic()
             data = {}
             if sensor_name == "odom":
                 pos = msg.pose.pose.position
@@ -470,8 +480,129 @@ class RobotClient:
             with self._lock:
                 self._sensors[sensor_name] = data
                 self._sensor_timestamps[sensor_name] = time.time()
+                self._append_observation("sensor", sensor_name, received_at, data)
         except Exception as e:
             logger.warning(f"Failed to parse sensor {sensor_name}: {e}")
+
+    # ------------------------------------------------------------------ #
+    # Observation history
+    # ------------------------------------------------------------------ #
+
+    def enable_observation_history(self, camera_names, horizon_s=0.5):
+        """Opt in to bounded receive-time history; callbacks never do policy work.
+
+        Entries reference newly decoded/parsed arrays, which callbacks replace
+        rather than modify. Only policy cameras retain image history. All access
+        to these rings uses the existing client lock.
+        """
+        if not math.isfinite(horizon_s) or horizon_s <= 0:
+            raise ValueError("Observation history horizon must be positive and finite")
+        cameras = tuple(camera_names)
+        if set(cameras) - self._config.get("cameras", {}).keys():
+            raise ValueError("Unknown observation history camera")
+        streams = [("image", name) for name in cameras]
+        streams += [("joint", name) for name, cfg in self._config.get("joint_groups", {}).items()
+                    if cfg.get("role") == "follower" and not cfg.get("parent")]
+        streams += [("sensor", name) for name in self._config.get("sensors", {})]
+        with self._lock:
+            self._observation_history = {key: deque(maxlen=256) for key in streams}
+            self._observation_history_horizon_s = horizon_s
+
+    def _append_observation(self, kind, name, timestamp, value):
+        """Caller holds _lock. Ignore late callbacks that finished out of order."""
+        history = getattr(self, "_observation_history", None)
+        ring = history.get((kind, name)) if history is not None else None
+        if ring is None or (ring and timestamp <= ring[-1][0]):
+            return
+        ring.append((timestamp, value))
+        cutoff = timestamp - self._observation_history_horizon_s
+        while len(ring) > 1 and ring[0][0] < cutoff:
+            ring.popleft()
+
+    def get_observation_window(self, n_obs_steps, interval_s, *, sensor_names=()):
+        """Return an immutable-in-time window immediately, or raise ValueError.
+
+        Use the latest policy-camera timestamp as the anchor and choose nearest
+        received samples within half an observation interval. Sampling is bounded
+        by the anchor (no samples from beyond this window), and camera frames
+        must be distinct. Receipt timestamps share the local monotonic clock;
+        ROS header clocks may belong to another host or Gazebo simulation time.
+        """
+        if not isinstance(n_obs_steps, int) or n_obs_steps < 1 or not math.isfinite(interval_s) or interval_s <= 0:
+            raise ValueError("Observation steps and interval must be positive")
+        max_age_s = max(0.25, 3 * interval_s)
+        tolerance = max(0.01, interval_s / 2)
+        with self._lock:
+            history = getattr(self, "_observation_history", None)
+            if history is None:
+                raise ValueError("Observation history is not enabled")
+            keys = [key for key in history if key[0] != "sensor"]
+            keys += [("sensor", name) for name in sensor_names]
+            rings = {}
+            now = time.monotonic()
+            for key in keys:
+                ring = history.get(key)
+                if not ring:
+                    raise ValueError(f"Observation history warming up: missing {key[0]}:{key[1]}")
+                if now - ring[-1][0] > max_age_s:
+                    raise ValueError(f"Stale observation stream: {key[0]}:{key[1]}")
+                rings[key] = list(ring)
+            camera_times = [ring[-1][0] for key, ring in rings.items() if key[0] == "image"]
+            if not camera_times:
+                raise ValueError("No policy camera in observation history")
+            anchor = max(camera_times)
+            targets = [anchor - (n_obs_steps - 1 - index) * interval_s for index in range(n_obs_steps)]
+            selected = {}
+            for key, ring in rings.items():
+                ring = [item for item in ring if item[0] <= anchor + 1e-9]
+                times = [item[0] for item in ring]
+                samples = []
+                for target in targets:
+                    index = bisect_left(times, target)
+                    candidates = [i for i in (index - 1, index) if 0 <= i < len(times)]
+                    if not candidates:
+                        raise ValueError(f"Observation history warming up: {key[0]}:{key[1]}")
+                    index = min(candidates, key=lambda i: abs(times[i] - target))
+                    if abs(times[index] - target) > tolerance + 1e-9:
+                        raise ValueError(f"Observation history gap: {key[0]}:{key[1]}")
+                    samples.append(ring[index])
+                if key[0] == "image" and any(b[0] <= a[0] for a, b in zip(samples, samples[1:])):
+                    raise ValueError(f"Observation history needs distinct camera frames: {key[1]}")
+                selected[key] = samples
+        # Data referenced by selected entries survives eviction. Convert/copy
+        # outside the callback lock so inference never blocks sensor acquisition.
+        observations = []
+        for index in range(n_obs_steps):
+            images, joints, sensors = {}, {}, {}
+            for (kind, name), samples in selected.items():
+                value = samples[index][1]
+                if kind == "image":
+                    images[name] = cv2.cvtColor(value, cv2.COLOR_BGR2RGB)
+                elif kind == "joint":
+                    joints.update({group: values.copy() for group, values in value.items()})
+                else:
+                    sensors[name] = {key: item.copy() if isinstance(item, np.ndarray) else item
+                                     for key, item in value.items()}
+            observations.append(dict(images=images, joints=joints, sensors=sensors))
+        metadata = dict(timestamp_basis="receive_monotonic", target_timestamps_s=targets,
+                        latest_age_ms=max(0.0, now - anchor) * 1000,
+                        max_alignment_error_ms=max(abs(samples[i][0] - target) * 1000
+                            for samples in selected.values() for i, target in enumerate(targets)),
+                        stream_timestamps_s={f"{kind}:{name}": [item[0] for item in samples]
+                                             for (kind, name), samples in selected.items()})
+        return observations, metadata
+
+    def wait_for_observation_history(self, n_obs_steps, interval_s, *, sensor_names=(), timeout=10.0):
+        """Warm up only during LOAD; normal inference requests never wait."""
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                self.get_observation_window(n_obs_steps, interval_s, sensor_names=sensor_names)
+                return
+            except ValueError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
 
     # ------------------------------------------------------------------ #
     # Image API
@@ -1105,6 +1236,8 @@ class RobotClient:
             except Exception as e:
                 logger.debug(f"Error closing preview publisher: {e}")
             self._preview_publisher = None
+        with self._lock:
+            self._observation_history = None
         logger.info("RobotClient closed")
 
     def __del__(self):

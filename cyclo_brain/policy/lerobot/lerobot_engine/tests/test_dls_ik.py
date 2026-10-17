@@ -4,6 +4,7 @@ import json
 import threading
 import unittest
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -194,8 +195,22 @@ class DLSRelativeEEFTest(unittest.TestCase):
         engine._cameras = engine._resolve_camera_mappings(robot.camera_names, {key})
         engine._image_resize = engine._infer_image_resize(engine._policy)
         engine._action_keys = list(self.adapter.action_keys)
-        engine._observation_interval_s = 0
+        engine._observation_interval_s = 1 / 30
+        self.seed_wrist_history(engine)
         return engine, key, images
+
+    @staticmethod
+    def seed_wrist_history(engine):
+        robot = engine._robot
+        robot.enable_observation_history(engine._cameras)
+        now = time.monotonic()
+        with robot._lock:
+            for timestamp in (now - 1 / 30, now):
+                for camera in engine._cameras:
+                    if camera in robot._images:
+                        robot._append_observation('image', camera, timestamp, robot._images[camera])
+                robot._append_observation('joint', 'follower_upper_body', timestamp,
+                                          dict(robot._joint_positions))
 
     def test_single_wrist_live_observation_keeps_recorded_pixels_for_each_selected_arm(self):
         for side in ("left", "right"):
@@ -220,13 +235,15 @@ class DLSRelativeEEFTest(unittest.TestCase):
                 engine._configure_arm_selection(SimpleNamespace(arm_selection=side))
                 camera = f"cam_{side}_wrist"
                 engine._robot._images[camera] = np.zeros((480, 640, 3), dtype=np.uint8)
+                self.seed_wrist_history(engine)
                 result = engine._build_policy_observation("")
                 self.assertFalse(result["success"])
                 self.assertIn("Native image shape mismatch", result["message"])
                 del engine._robot._images[camera]
+                self.seed_wrist_history(engine)
                 result = engine._build_policy_observation("")
                 self.assertFalse(result["success"])
-                self.assertIn(f"Missing camera frame: {camera}", result["message"])
+                self.assertIn(f"missing image:{camera}", result["message"])
 
     def test_single_wrist_checkpoint_must_match_selected_arm_and_keep_native_encoder(self):
         for side in ("left", "right"):

@@ -211,6 +211,10 @@ class LeRobotEngine(
             from .chunkrl import configure_chunkrl
             configure_chunkrl(self, request)
             self._dataset_simulation = dataset_robot
+            if dataset_robot is None and self._policy.config.type == "diffusion":
+                self._robot.wait_for_observation_history(
+                    self._policy.config.n_obs_steps, self._observation_interval_s,
+                    sensor_names=self._observation_sensor_names())
 
             return {
                 "success": True,
@@ -285,6 +289,7 @@ class LeRobotEngine(
         finally:
             self._last_inference_telemetry = trace.finish(
                 eef=preview, action_request_mode=getattr(self, "_action_request_mode", "async"),
+                observation_window=getattr(self, "_observation_window", None),
                 chunkrl_decisions=manager.last_decisions if manager is not None else [])
 
     def dataset_simulation_command(self, request: Any) -> Dict[str, Any]:
